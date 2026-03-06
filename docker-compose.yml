@@ -1,6 +1,6 @@
 services:
   geoloom:
-    image: ${GEOLOOM_IMAGE:-ghcr.io/sarices/geoloom:v0.2.0}
+    image: ${GEOLOOM_IMAGE:-ghcr.io/sarices/geoloom:v0.2.1}
     container_name: geoloom
     restart: unless-stopped
     ports:

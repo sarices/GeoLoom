@@ -72,7 +72,7 @@ go run ./cmd/geoloom -version
 
 ### 5) Docker Compose 部署（GHCR 镜像）
 
-> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.0`。
+> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.1`。
 
 1. 准备配置文件（示例）：
 
