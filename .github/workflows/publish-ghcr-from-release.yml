@@ -1,0 +1,121 @@
+name: publish-ghcr-from-release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/geoloom
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "image=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "amd64_archive=geoloom_${TAG}_linux_amd64.tar.gz" >> "$GITHUB_OUTPUT"
+          echo "arm64_archive=geoloom_${TAG}_linux_arm64.tar.gz" >> "$GITHUB_OUTPUT"
+
+      - name: Download linux release archives
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "${{ steps.meta.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --pattern "${{ steps.meta.outputs.amd64_archive }}" \
+            --pattern "${{ steps.meta.outputs.arm64_archive }}" \
+            --clobber
+
+      - name: Extract linux binaries
+        id: extract
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf .ghcr-build
+          mkdir -p .ghcr-build/amd64 .ghcr-build/arm64
+
+          tar -xzf "${{ steps.meta.outputs.amd64_archive }}" -C .ghcr-build/amd64
+          tar -xzf "${{ steps.meta.outputs.arm64_archive }}" -C .ghcr-build/arm64
+
+          AMD64_BIN="$(find .ghcr-build/amd64 -type f -name geoloom | head -n 1)"
+          ARM64_BIN="$(find .ghcr-build/arm64 -type f -name geoloom | head -n 1)"
+
+          if [ -z "$AMD64_BIN" ] || [ -z "$ARM64_BIN" ]; then
+            echo "未在发布归档中找到 geoloom 可执行文件" >&2
+            exit 1
+          fi
+
+          cp "$AMD64_BIN" .ghcr-build/amd64/geoloom-linux-amd64
+          cp "$ARM64_BIN" .ghcr-build/arm64/geoloom-linux-arm64
+          cp Dockerfile.binary .ghcr-build/amd64/Dockerfile.binary
+          cp Dockerfile.binary .ghcr-build/arm64/Dockerfile.binary
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push amd64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./.ghcr-build/amd64
+          file: ./.ghcr-build/amd64/Dockerfile.binary
+          push: true
+          platforms: linux/amd64
+          build-args: |
+            BIN_FILE=geoloom-linux-amd64
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-amd64
+
+      - name: Build and push arm64 image
+        uses: docker/build-push-action@v6
+        with:
+          context: ./.ghcr-build/arm64
+          file: ./.ghcr-build/arm64/Dockerfile.binary
+          push: true
+          platforms: linux/arm64
+          build-args: |
+            BIN_FILE=geoloom-linux-arm64
+          tags: |
+            ${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-arm64
+
+      - name: Create and push multi-arch manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools create \
+            -t "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}" \
+            -t "${{ steps.meta.outputs.image }}:latest" \
+            "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-amd64" \
+            "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}-arm64"
+
+      - name: Inspect pushed image
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${{ steps.meta.outputs.image }}:${{ steps.meta.outputs.tag }}"

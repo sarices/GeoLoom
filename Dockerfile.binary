@@ -1,0 +1,12 @@
+FROM alpine:3.20
+
+RUN apk add --no-cache ca-certificates tzdata && \
+    addgroup -S geoloom && adduser -S -G geoloom geoloom
+
+ARG BIN_FILE=geoloom-linux-amd64
+COPY ${BIN_FILE} /usr/local/bin/geoloom
+RUN chmod +x /usr/local/bin/geoloom
+
+USER geoloom
+ENTRYPOINT ["/usr/local/bin/geoloom"]
+CMD ["-config", "/etc/geoloom/config.yaml"]
