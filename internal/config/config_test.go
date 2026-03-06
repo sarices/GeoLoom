@@ -260,7 +260,7 @@ func TestValidateHealthCheckEnabledErrors(t *testing.T) {
 	}
 }
 
-func TestLoadRepoConfigShouldPass(t *testing.T) {
+func TestLoadRepoConfigsShouldPass(t *testing.T) {
 	t.Parallel()
 
 	_, file, _, ok := runtime.Caller(0)
@@ -268,13 +268,37 @@ func TestLoadRepoConfigShouldPass(t *testing.T) {
 		t.Fatal("获取当前测试文件路径失败")
 	}
 
-	configPath := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "configs", "config.yaml"))
-	cfg, err := Load(configPath)
-	if err != nil {
-		t.Fatalf("加载仓库默认配置失败: %v", err)
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(file), "..", ".."))
+	tests := []struct {
+		name       string
+		configPath string
+	}{
+		{
+			name:       "默认配置",
+			configPath: filepath.Join(repoRoot, "configs", "config.yaml"),
+		},
+		{
+			name:       "示例配置",
+			configPath: filepath.Join(repoRoot, "configs", "config.example.yaml"),
+		},
+		{
+			name:       "生产示例配置",
+			configPath: filepath.Join(repoRoot, "configs", "config.example.prod.yaml"),
+		},
 	}
-	if len(cfg.Sources) == 0 {
-		t.Fatal("默认配置 sources 不应为空")
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg, err := Load(tt.configPath)
+			if err != nil {
+				t.Fatalf("加载配置失败: path=%s err=%v", tt.configPath, err)
+			}
+			if len(cfg.Sources) == 0 {
+				t.Fatalf("配置 sources 不应为空: path=%s", tt.configPath)
+			}
+		})
 	}
 }
 
