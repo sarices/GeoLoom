@@ -4,6 +4,11 @@ on:
   release:
     types: [published]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to publish (e.g. v0.2.0)"
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,7 +30,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
+          TAG="${{ github.event.release.tag_name || inputs.tag }}"
+          if [ -z "$TAG" ]; then
+            echo "无法解析发布标签（release.tag_name / inputs.tag 均为空）" >&2
+            exit 1
+          fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
           echo "image=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
           echo "amd64_archive=geoloom_${TAG}_linux_amd64.tar.gz" >> "$GITHUB_OUTPUT"
