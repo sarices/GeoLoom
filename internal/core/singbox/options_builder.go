@@ -22,7 +22,7 @@ const (
 	defaultInboundTag  = "in-socks"
 	directOutboundTag  = "direct"
 	defaultLBTag       = "lb-out"
-	defaultListenAddr  = "127.0.0.1"
+	defaultListenAddr  = "0.0.0.0"
 	maxValidPortNumber = 65535
 )
 

@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"net/netip"
 	"testing"
 
 	"geoloom/internal/config"
@@ -78,6 +79,17 @@ func TestOptionsBuilderBuildSuccess(t *testing.T) {
 	}
 	if options.Inbounds[0].Type != C.TypeSOCKS {
 		t.Fatalf("inbound 类型错误: got=%s", options.Inbounds[0].Type)
+	}
+	socksInbound, ok := options.Inbounds[0].Options.(*option.SocksInboundOptions)
+	if !ok {
+		t.Fatalf("inbound options 类型错误: %T", options.Inbounds[0].Options)
+	}
+	if socksInbound.Listen == nil {
+		t.Fatal("inbound 监听地址为空")
+	}
+	listenAddr := (*socksInbound.Listen).Build(netip.Addr{})
+	if listenAddr.String() != defaultListenAddr {
+		t.Fatalf("inbound 监听地址错误: got=%s want=%s", listenAddr.String(), defaultListenAddr)
 	}
 
 	if len(options.Outbounds) != len(nodes)+2 {
