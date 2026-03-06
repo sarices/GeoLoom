@@ -1,0 +1,48 @@
+# GeoLoom 示例配置（可复制为 config.yaml 后按需修改）
+
+gateway:
+  # 当前版本实际使用 socks_port 作为统一入口。
+  http_port: 8080
+  socks_port: 1080
+
+policy:
+  # 可选：random / urltest
+  strategy: random
+  filter:
+    # 本地未配置 MMDB 时，建议保持空，避免节点被全部过滤。
+    allow: []
+    block: []
+  health_check:
+    enabled: true
+    interval: 5m
+    url: http://cp.cloudflare.com
+
+geo:
+  # 显式路径优先：为空时进入默认逻辑。
+  mmdb_path: ""
+  # 当 mmdb_path 为空且程序目录无 GeoLite2-Country.mmdb 时，使用该地址自动下载。
+  # 仅支持 http/https。
+  mmdb_url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+  dns_timeout: 3s
+
+sources:
+  # source 支持三种写法：
+  # 1) 裸文件路径（推荐本地测试）
+  - name: local-file
+    type: source
+    url: "sub.txt"
+
+  # 2) 显式 @文件路径
+  # - name: local-file-at
+  #   type: source
+  #   url: "@configs/sub.txt"
+
+  # 3) 远程订阅链接
+  # - name: remote-subscription
+  #   type: source
+  #   url: "https://example.com/subscription.txt"
+
+  # 单节点直连输入（按需启用）
+  # - name: direct-node
+  #   type: node
+  #   url: "socks5://user:pass@1.2.3.4:1080#demo"

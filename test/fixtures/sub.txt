@@ -1,0 +1,5 @@
+# 脱敏后的输入样例（对应 docs/sub.txt）
+https://sub.example.test/api/v1/client/subscribe?token=redacted-token
+hysteria2://redacted-pass@156.246.91.11:2000?security=tls&alpn=h3&insecure=1&sni=www.bing.com#hy2-jph4
+socks5://guest:redacted-pass@149.130.191.255:6161
+https://raw.githubusercontent.com/maxbirdman/auto_meta_yml/refs/heads/main/outcome.meta.yml

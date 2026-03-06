@@ -1,0 +1,45 @@
+# Go build artifacts
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# Go coverage
+coverage.out
+*.coverprofile
+
+# Go workspace / cache (optional local)
+bin/
+dist/
+
+# Dependency vendor (if not committed)
+# vendor/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Logs
+*.log
+
+# Environment files
+.env
+.env.*
+
+# Claude / agent local state
+.claude/
+.agentdocs/**/*.tmp
+.agentdocs
+CLAUDE.md
+AGENTS.md
+
+# Config files subscription
+configs/config.yaml
+configs.sub.txt
+
