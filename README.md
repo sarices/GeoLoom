@@ -270,6 +270,10 @@ go build ./cmd/geoloom
 - 产品需求与架构约束：`docs/geoloom.prd.md`
 - 输入样例来源：`docs/sub.txt`（测试请使用脱敏样例）
 
+## License
+
+本项目使用 [MIT License](./LICENSE)。
+
 ## 说明
 
 当前仓库仍以 MVP 到阶段化演进为主，默认配置偏向最小可运行链路。如用于生产环境，请补充：
