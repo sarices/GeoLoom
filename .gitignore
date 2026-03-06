@@ -43,5 +43,7 @@ AGENTS.md
 configs/config.yaml
 configs.sub.txt
 
+# Local runtime artifacts
+GeoLite2-Country.mmdb
 geoloom
 
