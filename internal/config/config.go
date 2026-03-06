@@ -16,6 +16,9 @@ const (
 
 	defaultHealthCheckInterval = "5m"
 	defaultHealthCheckURL      = "http://cp.cloudflare.com"
+
+	minPort = 1
+	maxPort = 65535
 )
 
 // Config 定义 GeoLoom 启动配置。
@@ -90,13 +93,34 @@ func Load(path string) (Config, error) {
 }
 
 func (c *Config) validate() error {
-	if c.Gateway.SocksPort <= 0 {
-		return fmt.Errorf("gateway.socks_port 必须大于 0")
+	if c.Gateway.HTTPPort < minPort || c.Gateway.HTTPPort > maxPort {
+		return fmt.Errorf("gateway.http_port 必须在 %d~%d 之间", minPort, maxPort)
+	}
+	if c.Gateway.SocksPort < minPort || c.Gateway.SocksPort > maxPort {
+		return fmt.Errorf("gateway.socks_port 必须在 %d~%d 之间", minPort, maxPort)
+	}
+	if c.Gateway.HTTPPort == c.Gateway.SocksPort {
+		return fmt.Errorf("gateway.http_port 与 gateway.socks_port 不能相同")
 	}
 
 	c.Policy.Strategy = normalizeStrategy(c.Policy.Strategy)
 	if c.Policy.HealthCheck.Enabled {
 		c.Policy.HealthCheck = normalizeHealthCheck(c.Policy.HealthCheck)
+		interval, err := time.ParseDuration(c.Policy.HealthCheck.Interval)
+		if err != nil {
+			return fmt.Errorf("policy.health_check.interval 非法: %w", err)
+		}
+		if interval <= 0 {
+			return fmt.Errorf("policy.health_check.interval 必须大于 0")
+		}
+		parsedHealthCheckURL, err := url.Parse(c.Policy.HealthCheck.URL)
+		if err != nil {
+			return fmt.Errorf("policy.health_check.url 非法: %w", err)
+		}
+		healthCheckScheme := strings.ToLower(strings.TrimSpace(parsedHealthCheckURL.Scheme))
+		if healthCheckScheme != "http" && healthCheckScheme != "https" {
+			return fmt.Errorf("policy.health_check.url 仅支持 http/https")
+		}
 	}
 
 	c.Policy.Filter.Allow = normalizeCountryCodes(c.Policy.Filter.Allow)
@@ -121,10 +145,16 @@ func (c *Config) validate() error {
 		return fmt.Errorf("geo.dns_timeout 非法: %w", err)
 	}
 
+	if len(c.Sources) == 0 {
+		return fmt.Errorf("sources 不能为空")
+	}
 	for i := range c.Sources {
 		c.Sources[i].Name = strings.TrimSpace(c.Sources[i].Name)
 		c.Sources[i].Type = strings.TrimSpace(strings.ToLower(c.Sources[i].Type))
 		c.Sources[i].URL = strings.TrimSpace(c.Sources[i].URL)
+		if !isValidSourceType(c.Sources[i].Type) {
+			return fmt.Errorf("sources[%d].type 非法: %s", i, c.Sources[i].Type)
+		}
 		if c.Sources[i].URL == "" {
 			return fmt.Errorf("sources[%d].url 不能为空", i)
 		}
@@ -170,4 +200,13 @@ func normalizeCountryCodes(values []string) []string {
 		result = append(result, normalized)
 	}
 	return result
+}
+
+func isValidSourceType(raw string) bool {
+	switch raw {
+	case "source", "subscribe", "node":
+		return true
+	default:
+		return false
+	}
 }

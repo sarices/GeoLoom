@@ -6,6 +6,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -54,6 +55,7 @@ func TestRunWithUnsupportedCoreVariantShouldSucceed(t *testing.T) {
 
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
 	cfgText := fmt.Sprintf(`gateway:
+  http_port: 8080
   socks_port: %d
 policy:
   strategy: random
@@ -97,6 +99,7 @@ func TestRunWithSourceBareFilePathShouldSucceed(t *testing.T) {
 
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	cfgText := fmt.Sprintf(`gateway:
+  http_port: 8080
   socks_port: %d
 policy:
   strategy: random
@@ -137,6 +140,7 @@ func TestRunWithSubscribeBareFilePathShouldSucceed(t *testing.T) {
 
 	cfgPath := filepath.Join(tmpDir, "config.yaml")
 	cfgText := fmt.Sprintf(`gateway:
+  http_port: 8080
   socks_port: %d
 policy:
   strategy: random
@@ -154,6 +158,58 @@ sources:
 
 	if err := Run(ctx, cfgPath); err != nil {
 		t.Fatalf("Run 返回错误: %v", err)
+	}
+}
+
+func TestRunWithInvalidGatewayHTTPPortShouldReturnFieldPath(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfgText := `gateway:
+  http_port: 0
+  socks_port: 1080
+sources:
+  - name: demo
+    type: node
+    url: "socks5://1.1.1.1:1080#demo"
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	err := Run(context.Background(), cfgPath)
+	if err == nil {
+		t.Fatal("预期 Run 返回错误，但得到 nil")
+	}
+	if !strings.Contains(err.Error(), "加载配置失败") {
+		t.Fatalf("错误信息缺少加载配置失败前缀: %v", err)
+	}
+	if !strings.Contains(err.Error(), "gateway.http_port") {
+		t.Fatalf("错误信息缺少字段路径: %v", err)
+	}
+}
+
+func TestRunWithInvalidSourceTypeShouldReturnFieldPath(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	cfgText := `gateway:
+  http_port: 8080
+  socks_port: 1080
+sources:
+  - name: demo
+    type: invalid
+    url: "socks5://1.1.1.1:1080#demo"
+`
+	if err := os.WriteFile(cfgPath, []byte(cfgText), 0o600); err != nil {
+		t.Fatalf("写入配置失败: %v", err)
+	}
+
+	err := Run(context.Background(), cfgPath)
+	if err == nil {
+		t.Fatal("预期 Run 返回错误，但得到 nil")
+	}
+	if !strings.Contains(err.Error(), "加载配置失败") {
+		t.Fatalf("错误信息缺少加载配置失败前缀: %v", err)
+	}
+	if !strings.Contains(err.Error(), "sources[0].type") {
+		t.Fatalf("错误信息缺少字段路径: %v", err)
 	}
 }
 

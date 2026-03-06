@@ -1,16 +1,27 @@
 package config
 
-import "testing"
+import (
+	"path/filepath"
+	"runtime"
+	"strings"
+	"testing"
+)
+
+func baseValidConfig() Config {
+	return Config{
+		Gateway: GatewayConfig{
+			HTTPPort:  8080,
+			SocksPort: 1080,
+		},
+		Policy:  PolicyConfig{},
+		Sources: []Source{{Type: "node", URL: "socks5://1.1.1.1:1080#demo"}},
+	}
+}
 
 func TestValidateGeoDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{
-		Gateway: GatewayConfig{SocksPort: 1080},
-		Policy:  PolicyConfig{},
-		Sources: []Source{{URL: "https://example.com/sub"}},
-	}
-
+	cfg := baseValidConfig()
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("校验失败: %v", err)
 	}
@@ -23,11 +34,8 @@ func TestValidateGeoDefaults(t *testing.T) {
 func TestValidateGeoDNSTimeoutInvalid(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{
-		Gateway: GatewayConfig{SocksPort: 1080},
-		Geo:     GeoConfig{DNSTimeout: "bad-timeout"},
-		Sources: []Source{{URL: "https://example.com/sub"}},
-	}
+	cfg := baseValidConfig()
+	cfg.Geo.DNSTimeout = "bad-timeout"
 
 	if err := cfg.validate(); err == nil {
 		t.Fatal("预期校验失败，但得到 nil")
@@ -37,13 +45,8 @@ func TestValidateGeoDNSTimeoutInvalid(t *testing.T) {
 func TestValidatePolicyStrategyNormalize(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{
-		Gateway: GatewayConfig{SocksPort: 1080},
-		Policy: PolicyConfig{
-			Strategy: "UNKNOWN",
-		},
-		Sources: []Source{{URL: "https://example.com/sub"}},
-	}
+	cfg := baseValidConfig()
+	cfg.Policy.Strategy = "UNKNOWN"
 
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("校验失败: %v", err)
@@ -56,13 +59,8 @@ func TestValidatePolicyStrategyNormalize(t *testing.T) {
 func TestValidateGeoMMDBURLInvalidScheme(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{
-		Gateway: GatewayConfig{SocksPort: 1080},
-		Geo: GeoConfig{
-			MMDBURL: "ftp://example.com/db.mmdb",
-		},
-		Sources: []Source{{URL: "https://example.com/sub"}},
-	}
+	cfg := baseValidConfig()
+	cfg.Geo.MMDBURL = "ftp://example.com/db.mmdb"
 
 	if err := cfg.validate(); err == nil {
 		t.Fatal("预期校验失败，但得到 nil")
@@ -72,13 +70,8 @@ func TestValidateGeoMMDBURLInvalidScheme(t *testing.T) {
 func TestValidateGeoMMDBURLHTTPShouldPass(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{
-		Gateway: GatewayConfig{SocksPort: 1080},
-		Geo: GeoConfig{
-			MMDBURL: "https://example.com/db.mmdb",
-		},
-		Sources: []Source{{URL: "https://example.com/sub"}},
-	}
+	cfg := baseValidConfig()
+	cfg.Geo.MMDBURL = "https://example.com/db.mmdb"
 
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("校验失败: %v", err)
@@ -88,13 +81,8 @@ func TestValidateGeoMMDBURLHTTPShouldPass(t *testing.T) {
 func TestValidateHealthCheckDefaults(t *testing.T) {
 	t.Parallel()
 
-	cfg := Config{
-		Gateway: GatewayConfig{SocksPort: 1080},
-		Policy: PolicyConfig{
-			HealthCheck: HealthCheckConfig{Enabled: true},
-		},
-		Sources: []Source{{URL: "https://example.com/sub"}},
-	}
+	cfg := baseValidConfig()
+	cfg.Policy.HealthCheck = HealthCheckConfig{Enabled: true}
 
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("校验失败: %v", err)
@@ -104,5 +92,203 @@ func TestValidateHealthCheckDefaults(t *testing.T) {
 	}
 	if cfg.Policy.HealthCheck.URL != defaultHealthCheckURL {
 		t.Fatalf("默认 url 错误: got=%s", cfg.Policy.HealthCheck.URL)
+	}
+}
+
+func TestValidateGatewayPortErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{
+			name: "http_port 小于等于 0",
+			mutate: func(cfg *Config) {
+				cfg.Gateway.HTTPPort = 0
+			},
+			wantErr: "gateway.http_port",
+		},
+		{
+			name: "http_port 超过上限",
+			mutate: func(cfg *Config) {
+				cfg.Gateway.HTTPPort = 70000
+			},
+			wantErr: "gateway.http_port",
+		},
+		{
+			name: "socks_port 小于等于 0",
+			mutate: func(cfg *Config) {
+				cfg.Gateway.SocksPort = 0
+			},
+			wantErr: "gateway.socks_port",
+		},
+		{
+			name: "socks_port 超过上限",
+			mutate: func(cfg *Config) {
+				cfg.Gateway.SocksPort = 65536
+			},
+			wantErr: "gateway.socks_port",
+		},
+		{
+			name: "http 与 socks 端口冲突",
+			mutate: func(cfg *Config) {
+				cfg.Gateway.HTTPPort = cfg.Gateway.SocksPort
+			},
+			wantErr: "gateway.http_port 与 gateway.socks_port 不能相同",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseValidConfig()
+			tt.mutate(&cfg)
+			err := cfg.validate()
+			if err == nil {
+				t.Fatal("预期校验失败，但得到 nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("错误信息不符合预期: got=%v want_contains=%s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateSourcesErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{
+			name: "sources 为空",
+			mutate: func(cfg *Config) {
+				cfg.Sources = nil
+			},
+			wantErr: "sources 不能为空",
+		},
+		{
+			name: "source type 非法",
+			mutate: func(cfg *Config) {
+				cfg.Sources[0].Type = "invalid"
+			},
+			wantErr: "sources[0].type",
+		},
+		{
+			name: "source url 为空",
+			mutate: func(cfg *Config) {
+				cfg.Sources[0].URL = "   "
+			},
+			wantErr: "sources[0].url",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseValidConfig()
+			tt.mutate(&cfg)
+			err := cfg.validate()
+			if err == nil {
+				t.Fatal("预期校验失败，但得到 nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("错误信息不符合预期: got=%v want_contains=%s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestValidateHealthCheckEnabledErrors(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantErr string
+	}{
+		{
+			name: "interval 非法格式",
+			mutate: func(cfg *Config) {
+				cfg.Policy.HealthCheck = HealthCheckConfig{Enabled: true, Interval: "bad", URL: "https://example.com"}
+			},
+			wantErr: "policy.health_check.interval",
+		},
+		{
+			name: "interval 非正数",
+			mutate: func(cfg *Config) {
+				cfg.Policy.HealthCheck = HealthCheckConfig{Enabled: true, Interval: "0s", URL: "https://example.com"}
+			},
+			wantErr: "policy.health_check.interval 必须大于 0",
+		},
+		{
+			name: "url 非法",
+			mutate: func(cfg *Config) {
+				cfg.Policy.HealthCheck = HealthCheckConfig{Enabled: true, Interval: "10s", URL: "http://[::1"}
+			},
+			wantErr: "policy.health_check.url",
+		},
+		{
+			name: "url scheme 非 http/https",
+			mutate: func(cfg *Config) {
+				cfg.Policy.HealthCheck = HealthCheckConfig{Enabled: true, Interval: "10s", URL: "ftp://example.com"}
+			},
+			wantErr: "policy.health_check.url 仅支持 http/https",
+		},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			cfg := baseValidConfig()
+			tt.mutate(&cfg)
+			err := cfg.validate()
+			if err == nil {
+				t.Fatal("预期校验失败，但得到 nil")
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("错误信息不符合预期: got=%v want_contains=%s", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadRepoConfigShouldPass(t *testing.T) {
+	t.Parallel()
+
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("获取当前测试文件路径失败")
+	}
+
+	configPath := filepath.Clean(filepath.Join(filepath.Dir(file), "..", "..", "configs", "config.yaml"))
+	cfg, err := Load(configPath)
+	if err != nil {
+		t.Fatalf("加载仓库默认配置失败: %v", err)
+	}
+	if len(cfg.Sources) == 0 {
+		t.Fatal("默认配置 sources 不应为空")
+	}
+}
+
+func TestValidateHealthCheckDisabledAllowsIncompleteFields(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseValidConfig()
+	cfg.Policy.HealthCheck = HealthCheckConfig{
+		Enabled:  false,
+		Interval: "bad-duration",
+		URL:      "ftp://example.com",
+	}
+
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("disabled 场景不应因 health_check 字段失败: %v", err)
 	}
 }
