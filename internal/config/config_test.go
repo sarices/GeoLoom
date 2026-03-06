@@ -260,6 +260,32 @@ func TestValidateHealthCheckEnabledErrors(t *testing.T) {
 	}
 }
 
+func TestSourceTypeHelpers(t *testing.T) {
+	t.Parallel()
+
+	normalized := NormalizeSourceType("  SuBsCriBe  ")
+	if normalized != SourceTypeSubscribe {
+		t.Fatalf("NormalizeSourceType 错误: got=%s want=%s", normalized, SourceTypeSubscribe)
+	}
+
+	if !IsValidSourceType(SourceTypeNode) {
+		t.Fatal("IsValidSourceType 对 node 应返回 true")
+	}
+	if IsValidSourceType("invalid") {
+		t.Fatal("IsValidSourceType 对非法类型应返回 false")
+	}
+
+	if !IsSourceLikeType(SourceTypeSource) {
+		t.Fatal("IsSourceLikeType 对 source 应返回 true")
+	}
+	if !IsSourceLikeType(SourceTypeSubscribe) {
+		t.Fatal("IsSourceLikeType 对 subscribe 应返回 true")
+	}
+	if IsSourceLikeType(SourceTypeNode) {
+		t.Fatal("IsSourceLikeType 对 node 应返回 false")
+	}
+}
+
 func TestLoadRepoConfigsShouldPass(t *testing.T) {
 	t.Parallel()
 

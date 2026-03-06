@@ -134,7 +134,7 @@ func Run(ctx context.Context, configPath string) error {
 
 func normalizeSourceURL(src config.Source, configPath string) string {
 	cleanedURL := strings.TrimSpace(src.URL)
-	if !isSourceLikeType(src.Type) {
+	if !config.IsSourceLikeType(src.Type) {
 		return cleanedURL
 	}
 	if cleanedURL == "" || strings.HasPrefix(cleanedURL, "@") || hasURLScheme(cleanedURL) {
@@ -147,11 +147,6 @@ func normalizeSourceURL(src config.Source, configPath string) string {
 
 func hasURLScheme(raw string) bool {
 	return urlSchemePattern.MatchString(strings.TrimSpace(raw))
-}
-
-func isSourceLikeType(rawType string) bool {
-	normalized := strings.TrimSpace(strings.ToLower(rawType))
-	return normalized == "source" || normalized == "subscribe"
 }
 
 func resolvePathByConfigPath(rawPath, configPath string) string {

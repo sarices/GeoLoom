@@ -14,6 +14,10 @@ const (
 	StrategyRandom  = "random"
 	StrategyURLTest = "urltest"
 
+	SourceTypeSource    = "source"
+	SourceTypeSubscribe = "subscribe"
+	SourceTypeNode      = "node"
+
 	defaultHealthCheckInterval = "5m"
 	defaultHealthCheckURL      = "http://cp.cloudflare.com"
 
@@ -150,9 +154,9 @@ func (c *Config) validate() error {
 	}
 	for i := range c.Sources {
 		c.Sources[i].Name = strings.TrimSpace(c.Sources[i].Name)
-		c.Sources[i].Type = strings.TrimSpace(strings.ToLower(c.Sources[i].Type))
+		c.Sources[i].Type = NormalizeSourceType(c.Sources[i].Type)
 		c.Sources[i].URL = strings.TrimSpace(c.Sources[i].URL)
-		if !isValidSourceType(c.Sources[i].Type) {
+		if !IsValidSourceType(c.Sources[i].Type) {
 			return fmt.Errorf("sources[%d].type 非法: %s", i, c.Sources[i].Type)
 		}
 		if c.Sources[i].URL == "" {
@@ -202,9 +206,22 @@ func normalizeCountryCodes(values []string) []string {
 	return result
 }
 
-func isValidSourceType(raw string) bool {
-	switch raw {
-	case "source", "subscribe", "node":
+func NormalizeSourceType(raw string) string {
+	return strings.TrimSpace(strings.ToLower(raw))
+}
+
+func IsValidSourceType(raw string) bool {
+	switch NormalizeSourceType(raw) {
+	case SourceTypeSource, SourceTypeSubscribe, SourceTypeNode:
+		return true
+	default:
+		return false
+	}
+}
+
+func IsSourceLikeType(raw string) bool {
+	switch NormalizeSourceType(raw) {
+	case SourceTypeSource, SourceTypeSubscribe:
 		return true
 	default:
 		return false
