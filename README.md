@@ -214,22 +214,22 @@ policy:
     allow: []
     block: []
   health_check:
-    enabled: true
+    enabled: false
     interval: 5m
     url: http://cp.cloudflare.com
 
 geo:
-  # 显式路径优先：为空时进入默认逻辑。
   mmdb_path: ""
-  # 当 mmdb_path 为空且程序目录无 GeoLite2-Country.mmdb 时，使用该地址自动下载（仅 http/https）。
   mmdb_url: ""
   dns_timeout: 3s
 
 sources:
-  - name: docs-sub
+  - name: local-source
     type: source
-    url: "sub.txt" # 可写裸文件路径 / @文件路径 / http(s)订阅
+    url: "sub.txt"
 ```
+
+生产环境参考模板：`configs/config.example.prod.yaml`（默认开启健康检查）。
 
 ### source 裸文件路径行为
 当 `type: source` 且 `url` 不带 scheme、也不以 `@` 开头时：
