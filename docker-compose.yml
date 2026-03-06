@@ -1,0 +1,10 @@
+services:
+  geoloom:
+    image: ${GEOLOOM_IMAGE:-ghcr.io/sarices/geoloom:v0.2.0}
+    container_name: geoloom
+    restart: unless-stopped
+    ports:
+      - "${GEOLOOM_HTTP_PORT:-8080}:8080"
+      - "${GEOLOOM_SOCKS_PORT:-1080}:1080"
+    volumes:
+      - ./configs/config.example.prod.yaml:/etc/geoloom/config.yaml:ro

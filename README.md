@@ -70,6 +70,41 @@ go build ./cmd/geoloom
 go run ./cmd/geoloom -version
 ```
 
+### 5) Docker Compose 部署（GHCR 镜像）
+
+> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.0`。
+
+1. 准备配置文件（示例）：
+
+```bash
+cp configs/config.example.prod.yaml configs/config.prod.yaml
+```
+
+2. 修改 `docker-compose.yml` 中的配置挂载（默认挂载 `configs/config.example.prod.yaml`），建议改为你自己的配置文件：
+
+```yaml
+volumes:
+  - ./configs/config.prod.yaml:/etc/geoloom/config.yaml:ro
+```
+
+3. 启动：
+
+```bash
+docker compose up -d
+```
+
+4. 查看日志：
+
+```bash
+docker compose logs -f geoloom
+```
+
+5. 停止：
+
+```bash
+docker compose down
+```
+
 示例输出：
 
 ```text
