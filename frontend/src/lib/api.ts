@@ -72,6 +72,29 @@ export type HealthResponse = {
   penalty_pool: Record<string, string>
 }
 
+type RawHealthResponse = {
+  config: {
+    enabled: boolean
+    interval: string
+    url: string
+  }
+  summary: {
+    tracked_nodes: number
+    penalized_nodes: number
+    last_rebuild_at: string
+  }
+  health: {
+    interval: number
+    debounce: number
+    test_url: string
+    timeout: number
+    last_candidates: string[] | null
+    last_rebuild_at: string
+    nodes: Record<string, { last_check_at: string; last_reachable: boolean }> | null
+  }
+  penalty_pool: Record<string, string> | null
+}
+
 export type ApiSnapshot = {
   status: StatusResponse
   sources: SourcesResponse
@@ -157,16 +180,36 @@ async function requestJson<T>(path: string, settings: ConnectionSettings): Promi
   return (await response.json()) as T
 }
 
+function normalizeStringArray(value: string[] | null | undefined) {
+  return Array.isArray(value) ? value : []
+}
+
+function normalizeRecord<T>(value: Record<string, T> | null | undefined) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {}
+}
+
+function normalizeHealthResponse(health: RawHealthResponse): HealthResponse {
+  return {
+    ...health,
+    health: {
+      ...health.health,
+      last_candidates: normalizeStringArray(health.health.last_candidates),
+      nodes: normalizeRecord(health.health.nodes),
+    },
+    penalty_pool: normalizeRecord(health.penalty_pool),
+  }
+}
+
 export async function fetchSnapshot(settings: ConnectionSettings): Promise<ApiSnapshot> {
   const [status, sources, nodes, candidates, health] = await Promise.all([
     requestJson<StatusResponse>('/api/v1/status', settings),
     requestJson<SourcesResponse>('/api/v1/sources', settings),
     requestJson<NodesResponse>('/api/v1/nodes', settings),
     requestJson<NodesResponse>('/api/v1/candidates', settings),
-    requestJson<HealthResponse>('/api/v1/health', settings),
+    requestJson<RawHealthResponse>('/api/v1/health', settings),
   ])
 
-  return { status, sources, nodes, candidates, health }
+  return { status, sources, nodes, candidates, health: normalizeHealthResponse(health) }
 }
 
 export function isUnauthorizedError(error: unknown) {

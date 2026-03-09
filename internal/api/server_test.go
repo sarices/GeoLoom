@@ -11,6 +11,8 @@ import (
 
 type fakeProvider struct{}
 
+type nullHealthProvider struct{ fakeProvider }
+
 func (fakeProvider) StatusPayload() any { return map[string]any{"ok": true, "raw_node_count": 2} }
 func (fakeProvider) SourcesPayload() any {
 	return map[string]any{"items": []map[string]any{{"name": "s1", "unsupported_count": 1}}}
@@ -21,6 +23,23 @@ func (fakeProvider) CandidatesPayload() any {
 }
 func (fakeProvider) HealthPayload() any {
 	return map[string]any{"summary": map[string]any{"penalized_nodes": 1}, "health": true}
+}
+
+func (nullHealthProvider) HealthPayload() any {
+	return map[string]any{
+		"config": map[string]any{"enabled": true, "interval": "30s", "url": "https://example.com"},
+		"summary": map[string]any{"tracked_nodes": 0, "penalized_nodes": 0, "last_rebuild_at": ""},
+		"health": map[string]any{
+			"interval": 1,
+			"debounce": 2,
+			"test_url": "https://example.com",
+			"timeout": 3,
+			"last_candidates": nil,
+			"last_rebuild_at": "",
+			"nodes": nil,
+		},
+		"penalty_pool": nil,
+	}
 }
 
 func TestServerEndpointsShouldReturn200(t *testing.T) {
@@ -121,6 +140,39 @@ func TestServerUnauthorizedPayloadShape(t *testing.T) {
 	}
 	if body["error"] != "unauthorized" {
 		t.Fatalf("错误响应体不符合预期: %+v", body)
+	}
+}
+
+func TestHealthPayloadShouldAllowNullCollections(t *testing.T) {
+	t.Parallel()
+
+	server := NewServer(nullHealthProvider{}, "", "")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/health", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("状态码错误: got=%d", resp.Code)
+	}
+
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析 JSON 失败: %v", err)
+	}
+
+	healthBody, ok := body["health"].(map[string]any)
+	if !ok {
+		t.Fatalf("health 字段类型错误: %+v", body)
+	}
+	if _, exists := healthBody["last_candidates"]; !exists {
+		t.Fatalf("health.last_candidates 缺失: %+v", healthBody)
+	}
+	if value, exists := healthBody["last_candidates"]; !exists || value != nil {
+		t.Fatalf("health.last_candidates 应允许为 null: %+v", healthBody)
+	}
+	if value, exists := healthBody["nodes"]; !exists || value != nil {
+		t.Fatalf("health.nodes 应允许为 null: %+v", healthBody)
+	}
+	if value, exists := body["penalty_pool"]; !exists || value != nil {
+		t.Fatalf("penalty_pool 应允许为 null: %+v", body)
 	}
 }
 

@@ -7,15 +7,19 @@ import { Badge } from '../components/badge'
 
 export function HealthPage({ health }: { health: HealthResponse }) {
   const { t } = useI18n()
-  const trackedEntries = Object.entries(health.health.nodes)
+  const lastCandidates = Array.isArray(health.health.last_candidates) ? health.health.last_candidates : []
+  const trackedNodes = health.health.nodes && typeof health.health.nodes === 'object' && !Array.isArray(health.health.nodes) ? health.health.nodes : {}
+  const penaltyPool = health.penalty_pool && typeof health.penalty_pool === 'object' && !Array.isArray(health.penalty_pool) ? health.penalty_pool : {}
+  const trackedEntries = Object.entries(trackedNodes)
+  const penaltyEntries = Object.entries(penaltyPool)
 
   return (
     <div className="space-y-7">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t('trackedNodes')} value={health.summary.tracked_nodes} accent="mint" hint={`interval ${health.config.interval}`} />
         <MetricCard label={t('penalizedNodes')} value={health.summary.penalized_nodes} accent="coral" hint={health.config.url} />
-        <MetricCard label="debounce" value={health.health.debounce} accent="gold" hint="ns" />
-        <MetricCard label="timeout" value={health.health.timeout} accent="gold" hint="ns" />
+        <MetricCard label="debounce" value={formatDurationNs(health.health.debounce)} accent="gold" hint={`${health.health.debounce} ns`} />
+        <MetricCard label="timeout" value={formatDurationNs(health.health.timeout)} accent="gold" hint={`${health.health.timeout} ns`} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
@@ -28,7 +32,7 @@ export function HealthPage({ health }: { health: HealthResponse }) {
             <div className="rounded-[22px] bg-card-muted px-4 py-4">
               <div className="text-text-soft">last candidates</div>
               <div className="mt-3 flex flex-wrap gap-2">
-                {health.health.last_candidates.length === 0 ? <span className="text-text-soft">—</span> : health.health.last_candidates.map((item) => <Badge key={item}>{item}</Badge>)}
+                {lastCandidates.length === 0 ? <span className="text-text-soft">—</span> : lastCandidates.map((item) => <Badge key={item}>{item}</Badge>)}
               </div>
             </div>
           </div>
@@ -37,10 +41,10 @@ export function HealthPage({ health }: { health: HealthResponse }) {
         <ShellCard tone="muted">
           <SectionTitle title={t('penaltyPool')} description={trackedEntries.length === 0 ? 'idle' : `${trackedEntries.length} tracked`} />
           <div className="space-y-3">
-            {Object.entries(health.penalty_pool).length === 0 ? (
+            {penaltyEntries.length === 0 ? (
               <div className="rounded-[22px] bg-shell-strong px-4 py-8 text-sm text-text-soft">—</div>
             ) : (
-              Object.entries(health.penalty_pool).map(([fingerprint, until]) => (
+              penaltyEntries.map(([fingerprint, until]) => (
                 <div key={fingerprint} className="rounded-[22px] bg-shell-strong px-4 py-4 text-sm">
                   <div className="break-all font-medium text-text-main">{fingerprint}</div>
                   <div className="mt-2 text-text-soft">{formatDate(until)}</div>
@@ -71,13 +75,39 @@ export function HealthPage({ health }: { health: HealthResponse }) {
           </div>
         </ShellCard>
 
-        <JsonPanel title={t('trackedMap')} description="raw health payload" data={health.health.nodes} />
+        <JsonPanel title={t('trackedMap')} description="raw health payload" data={trackedNodes} />
       </div>
     </div>
   )
 }
 
+function formatDurationNs(value: number) {
+  if (!Number.isFinite(value) || value < 0) return String(value)
+  if (value >= 1_000_000_000) {
+    const seconds = value / 1_000_000_000
+    return Number.isInteger(seconds) ? `${seconds}s` : `${seconds.toFixed(1)}s`
+  }
+  if (value >= 1_000_000) {
+    const milliseconds = value / 1_000_000
+    return Number.isInteger(milliseconds) ? `${milliseconds}ms` : `${milliseconds.toFixed(1)}ms`
+  }
+  if (value >= 1_000) {
+    const microseconds = value / 1_000
+    return Number.isInteger(microseconds) ? `${microseconds}µs` : `${microseconds.toFixed(1)}µs`
+  }
+  return `${value}ns`
+}
+
 function formatDate(value: string) {
+  if (!value || value === '0001-01-01T00:00:00Z' || value === '0001-01-01T00:00:00+00:00') {
+    return '—'
+  }
   const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? value : date.toLocaleString()
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+  if (date.getUTCFullYear() <= 1) {
+    return '—'
+  }
+  return date.toLocaleString()
 }
