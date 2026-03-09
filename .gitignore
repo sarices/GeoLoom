@@ -46,6 +46,7 @@ configs.sub.txt
 # Local runtime artifacts
 GeoLite2-Country.mmdb
 geoloom
+configs/geoloom-state*.json
 
 # Frontend
 frontend/node_modules/
