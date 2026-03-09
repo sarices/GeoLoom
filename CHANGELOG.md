@@ -1,5 +1,17 @@
 # Changelog
 
+## [v0.2.6] - 2026-03-09
+
+### 新增
+- 增加远程文本 source 正文逐行 fallback 解析能力，在结构化内容识别失败或混合输入场景下继续补齐可识别节点。
+- 增加 `socks4` 与 `http` 节点端到端支持，打通 parser、core 构建与运行链路。
+- 增加 dirty fixture 回归测试资产，覆盖远程文本 source 中非法端口、非法 URI、不支持 scheme、重复别名与大小写/空白扰动等脏数据场景。
+
+### 改进
+- 修复 HTTP outbound registry 启动缺失问题，避免 `http` 节点在真实 `Service.Start` 链路中因注册不完整而启动失败。
+- README、Docker Compose 示例、构建脚本默认版本与程序默认版本已同步到 `v0.2.6`。
+- 补强远程 source fallback、`socks4/http` 支持与回归测试相关文档说明，便于本地验证与后续发版复核。
+
 ## [v0.2.5] - 2026-03-09
 
 ### 新增
