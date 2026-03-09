@@ -95,12 +95,26 @@ type RawHealthResponse = {
   penalty_pool: Record<string, string> | null
 }
 
+export type LogsResponse = {
+  items: Array<{
+    time: string
+    level: string
+    message: string
+    attrs: Record<string, unknown>
+    text: string
+  }>
+  count: number
+  capacity: number
+  truncated: boolean
+}
+
 export type ApiSnapshot = {
   status: StatusResponse
   sources: SourcesResponse
   nodes: NodesResponse
   candidates: NodesResponse
   health: HealthResponse
+  logs: LogsResponse
 }
 
 export type ConnectionSettings = {
@@ -201,15 +215,16 @@ function normalizeHealthResponse(health: RawHealthResponse): HealthResponse {
 }
 
 export async function fetchSnapshot(settings: ConnectionSettings): Promise<ApiSnapshot> {
-  const [status, sources, nodes, candidates, health] = await Promise.all([
+  const [status, sources, nodes, candidates, health, logs] = await Promise.all([
     requestJson<StatusResponse>('/api/v1/status', settings),
     requestJson<SourcesResponse>('/api/v1/sources', settings),
     requestJson<NodesResponse>('/api/v1/nodes', settings),
     requestJson<NodesResponse>('/api/v1/candidates', settings),
     requestJson<RawHealthResponse>('/api/v1/health', settings),
+    requestJson<LogsResponse>('/api/v1/logs', settings),
   ])
 
-  return { status, sources, nodes, candidates, health: normalizeHealthResponse(health) }
+  return { status, sources, nodes, candidates, health: normalizeHealthResponse(health), logs }
 }
 
 export function isUnauthorizedError(error: unknown) {

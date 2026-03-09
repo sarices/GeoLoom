@@ -17,6 +17,7 @@ import (
 	"geoloom/internal/domain"
 	"geoloom/internal/geo"
 	netresolver "geoloom/internal/net"
+	"geoloom/internal/observability"
 	"geoloom/internal/provider/parser"
 	"geoloom/internal/provider/source"
 )
@@ -33,7 +34,19 @@ var (
 )
 
 // Run 负责应用启动与生命周期收敛。
-func Run(ctx context.Context, configPath string) error {
+func Run(ctx context.Context, configPath string, args ...any) error {
+	var version string
+	var logBuffer *observability.LogBuffer
+	if len(args) > 0 {
+		if value, ok := args[0].(string); ok {
+			version = value
+		}
+	}
+	if len(args) > 1 {
+		if value, ok := args[1].(*observability.LogBuffer); ok {
+			logBuffer = value
+		}
+	}
 	cfg, err := config.Load(configPath)
 	if err != nil {
 		return fmt.Errorf("加载配置失败: %w", err)
@@ -45,7 +58,7 @@ func Run(ctx context.Context, configPath string) error {
 		"strategy", cfg.Policy.Strategy,
 	)
 
-	runtime := NewRuntime(ctx, cfg, configPath, parser.NewDispatcher(source.NewSubscriptionFetcher(nil)), "")
+	runtime := NewRuntime(ctx, cfg, configPath, parser.NewDispatcher(source.NewSubscriptionFetcher(nil)), version, logBuffer)
 	if err := runtime.Start(ctx); err != nil {
 		return err
 	}

@@ -24,19 +24,22 @@ func (fakeProvider) CandidatesPayload() any {
 func (fakeProvider) HealthPayload() any {
 	return map[string]any{"summary": map[string]any{"penalized_nodes": 1}, "health": true}
 }
+func (fakeProvider) LogsPayload() any {
+	return map[string]any{"items": []map[string]any{{"message": "启动完成", "level": "INFO"}}, "count": 1, "capacity": 300, "truncated": false}
+}
 
 func (nullHealthProvider) HealthPayload() any {
 	return map[string]any{
-		"config": map[string]any{"enabled": true, "interval": "30s", "url": "https://example.com"},
+		"config":  map[string]any{"enabled": true, "interval": "30s", "url": "https://example.com"},
 		"summary": map[string]any{"tracked_nodes": 0, "penalized_nodes": 0, "last_rebuild_at": ""},
 		"health": map[string]any{
-			"interval": 1,
-			"debounce": 2,
-			"test_url": "https://example.com",
-			"timeout": 3,
+			"interval":        1,
+			"debounce":        2,
+			"test_url":        "https://example.com",
+			"timeout":         3,
 			"last_candidates": nil,
 			"last_rebuild_at": "",
-			"nodes": nil,
+			"nodes":           nil,
 		},
 		"penalty_pool": nil,
 	}
@@ -46,7 +49,7 @@ func TestServerEndpointsShouldReturn200(t *testing.T) {
 	t.Parallel()
 	server := NewServer(fakeProvider{}, "", "")
 	handler := server.Handler()
-	for _, path := range []string{"/api/v1/status", "/api/v1/sources", "/api/v1/nodes", "/api/v1/candidates", "/api/v1/health"} {
+	for _, path := range []string{"/api/v1/status", "/api/v1/sources", "/api/v1/nodes", "/api/v1/candidates", "/api/v1/health", "/api/v1/logs"} {
 		req := httptest.NewRequest(http.MethodGet, path, nil)
 		resp := httptest.NewRecorder()
 		handler.ServeHTTP(resp, req)
@@ -84,6 +87,24 @@ func TestSourcesPayloadShape(t *testing.T) {
 	}
 	if len(body["items"]) != 1 || body["items"][0]["unsupported_count"].(float64) != 1 {
 		t.Fatalf("sources 字段错误: %+v", body)
+	}
+}
+
+func TestLogsPayloadShape(t *testing.T) {
+	t.Parallel()
+	server := NewServer(fakeProvider{}, "", "")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/logs", nil))
+	var body map[string]any
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析 JSON 失败: %v", err)
+	}
+	if body["count"].(float64) != 1 {
+		t.Fatalf("logs count 字段错误: %+v", body)
+	}
+	items, ok := body["items"].([]any)
+	if !ok || len(items) != 1 {
+		t.Fatalf("logs items 字段错误: %+v", body)
 	}
 }
 
@@ -127,7 +148,7 @@ func TestServerUnauthorizedPayloadShape(t *testing.T) {
 
 	server := NewServer(fakeProvider{}, "X-GeoLoom-Token", "secret-token")
 	resp := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/logs", nil)
 	server.Handler().ServeHTTP(resp, req)
 
 	if resp.Code != http.StatusUnauthorized {

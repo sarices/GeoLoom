@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"geoloom/internal/app"
+	"geoloom/internal/observability"
 )
 
 var (
@@ -35,6 +36,10 @@ func main() {
 		return
 	}
 
+	logBuffer := observability.NewLogBuffer(300)
+	observability.SetDefaultLogBuffer(logBuffer)
+	slog.SetDefault(slog.New(observability.NewTeeHandler(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{}), logBuffer)))
+
 	configPath := resolveConfigPath(*configPathFlag)
 	slog.Info("GeoLoom 版本信息",
 		"version", Version,
@@ -45,7 +50,7 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := app.Run(ctx, configPath); err != nil {
+	if err := app.Run(ctx, configPath, Version, logBuffer); err != nil {
 		slog.Error("GeoLoom 启动失败", "error", err)
 		os.Exit(1)
 	}

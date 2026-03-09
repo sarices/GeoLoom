@@ -6,12 +6,13 @@ import { StatusPage } from './pages/status-page'
 import { SourcesPage } from './pages/sources-page'
 import { NodesPage } from './pages/nodes-page'
 import { HealthPage } from './pages/health-page'
+import { LogsPage } from './pages/logs-page'
 import { ShellCard } from './components/shell-card'
 import { Badge } from './components/badge'
 
-type NavKey = 'status' | 'sources' | 'nodes' | 'candidates' | 'health'
+type NavKey = 'status' | 'sources' | 'nodes' | 'candidates' | 'health' | 'logs'
 
-const navKeys: NavKey[] = ['status', 'sources', 'nodes', 'candidates', 'health']
+const navKeys: NavKey[] = ['status', 'sources', 'nodes', 'candidates', 'health', 'logs']
 
 export function App() {
   const { locale, setLocale, t } = useI18n()
@@ -31,6 +32,7 @@ export function App() {
       nodes: t('navNodes'),
       candidates: t('navCandidates'),
       health: t('navHealth'),
+      logs: t('navLogs'),
     }),
     [t],
   )
@@ -180,6 +182,8 @@ function renderPage(active: NavKey, snapshot: ApiSnapshot, t: (key: string, args
       return <NodesPage title={t('candidatesTitle')} nodes={snapshot.candidates} />
     case 'health':
       return <HealthPage health={snapshot.health} />
+    case 'logs':
+      return <LogsPage logs={snapshot.logs} />
     default:
       return null
   }

@@ -13,6 +13,7 @@ import (
 	"geoloom/internal/domain"
 	"geoloom/internal/filter"
 	"geoloom/internal/health"
+	"geoloom/internal/observability"
 	"geoloom/internal/provider/parser"
 	"geoloom/internal/state"
 )
@@ -83,6 +84,7 @@ type Runtime struct {
 	checker    *health.Checker
 	penalty    *health.PenaltyPool
 	store      *state.Store
+	logBuffer  *observability.LogBuffer
 	startedAt  time.Time
 	version    string
 
@@ -90,9 +92,13 @@ type Runtime struct {
 	snapshot RuntimeSnapshot
 }
 
-func NewRuntime(ctx context.Context, cfg config.Config, configPath string, dispatcher *parser.Dispatcher, version string) *Runtime {
+func NewRuntime(ctx context.Context, cfg config.Config, configPath string, dispatcher *parser.Dispatcher, version string, logBuffers ...*observability.LogBuffer) *Runtime {
 	if dispatcher == nil {
 		dispatcher = parser.NewDispatcher(nil)
+	}
+	var logBuffer *observability.LogBuffer
+	if len(logBuffers) > 0 {
+		logBuffer = logBuffers[0]
 	}
 	penalty := health.NewPenaltyPool(5 * time.Minute)
 	core := singbox.NewService(ctx, singbox.NewOptionsBuilder())
@@ -102,6 +108,7 @@ func NewRuntime(ctx context.Context, cfg config.Config, configPath string, dispa
 		dispatcher: dispatcher,
 		core:       core,
 		penalty:    penalty,
+		logBuffer:  logBuffer,
 		startedAt:  time.Now(),
 		version:    strings.TrimSpace(version),
 	}
@@ -290,6 +297,19 @@ func (r *Runtime) HealthPayload() any {
 		},
 		"health":       snapshot.Health,
 		"penalty_pool": snapshot.PenaltyPool,
+	}
+}
+
+func (r *Runtime) LogsPayload() any {
+	if r.logBuffer == nil {
+		return map[string]any{"items": []observability.LogEntry{}, "count": 0, "capacity": 0, "truncated": false}
+	}
+	items, count, capacity, truncated := r.logBuffer.Snapshot()
+	return map[string]any{
+		"items":     items,
+		"count":     count,
+		"capacity":  capacity,
+		"truncated": truncated,
 	}
 }
 

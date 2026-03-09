@@ -14,6 +14,7 @@ type SnapshotProvider interface {
 	NodesPayload() any
 	CandidatesPayload() any
 	HealthPayload() any
+	LogsPayload() any
 }
 
 // Server 提供最小只读管理 API 与嵌入式前端静态页面。
@@ -40,6 +41,7 @@ func (s *Server) Handler() http.Handler {
 	apiMux.HandleFunc("/api/v1/nodes", s.handleNodes)
 	apiMux.HandleFunc("/api/v1/candidates", s.handleCandidates)
 	apiMux.HandleFunc("/api/v1/health", s.handleHealth)
+	apiMux.HandleFunc("/api/v1/logs", s.handleLogs)
 	apiMux.HandleFunc("/api/v1/", s.handleAPINotFound)
 
 	apiHandler := http.Handler(apiMux)
@@ -71,6 +73,10 @@ func (s *Server) handleCandidates(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, s.provider.HealthPayload())
+}
+
+func (s *Server) handleLogs(w http.ResponseWriter, _ *http.Request) {
+	s.writeJSON(w, http.StatusOK, s.provider.LogsPayload())
 }
 
 func (s *Server) handleAPINotFound(w http.ResponseWriter, _ *http.Request) {

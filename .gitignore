@@ -41,7 +41,7 @@ AGENTS.md
 
 # Config files subscription
 configs/config.yaml
-configs.sub.txt
+configs/sub.txt
 
 # Local runtime artifacts
 GeoLite2-Country.mmdb
