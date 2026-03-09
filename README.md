@@ -207,9 +207,50 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 }
 ```
 
+#### `GET /api/v1/logs`
+
+```json
+{
+  "count": 2,
+  "capacity": 300,
+  "truncated": false,
+  "items": [
+    {
+      "time": "2026-03-09T07:30:21Z",
+      "level": "INFO",
+      "message": "GeoLoom 版本信息",
+      "attrs": {
+        "version": "v0.2.5",
+        "commit": "bc7bfb2",
+        "build_time": "2026-03-09T07:30:21Z"
+      },
+      "text": "2026-03-09T07:30:21Z INFO  GeoLoom 版本信息 version=v0.2.5 commit=bc7bfb2 build_time=2026-03-09T07:30:21Z"
+    },
+    {
+      "time": "2026-03-09T07:31:02Z",
+      "level": "WARN",
+      "message": "状态文件损坏，已忽略并按空状态启动",
+      "attrs": {
+        "error": "invalid character 'x' looking for beginning of value",
+        "path": "geoloom-state.json"
+      },
+      "text": "2026-03-09T07:31:02Z WARN  状态文件损坏，已忽略并按空状态启动 error=invalid character 'x' looking for beginning of value path=geoloom-state.json"
+    }
+  ]
+}
+```
+
+说明：
+- `count` 表示当前返回的日志条数。
+- `capacity` 表示内存日志环形缓冲的容量上限。
+- `truncated=true` 表示日志写入量已超过缓冲容量，当前仅保留最近日志。
+- `items[*].attrs` 为该条日志附带的结构化属性，具体 key 会随日志事件不同而变化。
+- `items[*].text` 为便于直接展示与复制排障的格式化文本。
+
 说明：
 - `status` 适合做总览卡片与配置摘要展示。
 - `health.summary` 适合做轻量状态面板；`health` 与 `penalty_pool` 适合调试与排障。
+- `logs` 适合做控制台只读日志面板与最近运行事件排查。
 - `health.interval`、`health.debounce`、`health.timeout` 当前按 Go `time.Duration` 的 JSON 语义输出为纳秒整数；如后续面向外部稳定开放，可再评估是否改为字符串时长。
 - 未配置 `api.token` 时，`/api/v1/*` 保持当前免鉴权行为。
 - 配置 `api.token` 后，所有管理 API 请求都需要携带 `api.auth_header` 指定的 header。
