@@ -63,7 +63,7 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 
 ```json
 {
-  "version": "v0.2.3",
+  "version": "v0.2.4",
   "started_at": "2026-03-09T10:00:00Z",
   "last_refresh_at": "2026-03-09T10:05:00Z",
   "source_count": 2,
@@ -232,6 +232,7 @@ docs/geoloom.prd.md        # 产品与架构约束
 
 ### 1) 准备环境
 - Go（建议使用当前稳定版）
+- Node.js 20+（用于 `frontend/` 管理面板开发）
 
 ### 2) 拉起程序
 
@@ -251,9 +252,54 @@ go build ./cmd/geoloom
 go run ./cmd/geoloom -version
 ```
 
+### 4) 前端管理面板（frontend）
+
+仓库内已提供 `frontend/` 子目录，用于消费现有只读管理 API：
+- `/api/v1/status`
+- `/api/v1/sources`
+- `/api/v1/nodes`
+- `/api/v1/candidates`
+- `/api/v1/health`
+
+安装依赖：
+
+```bash
+cd frontend && npm install
+```
+
+开发启动：
+
+```bash
+cd frontend && npm run dev
+```
+
+生产构建（构建产物会输出到 `internal/api/frontenddist/`，供 Go 服务嵌入）：
+
+```bash
+cd frontend && npm run build
+```
+
+说明：
+- Vite 开发服务器默认运行在 `http://127.0.0.1:5173`。
+- 开发期通过 Vite proxy 将 `/api/*` 转发到 `http://127.0.0.1:9090`。
+- 生产/本地运行期由 GeoLoom 统一提供：
+  - `/api/v1/*`：只读 JSON API
+  - `/assets/*`：前端静态资源
+  - `/`：前端入口页
+  - 其他非 `/api/` 路径：SPA fallback 到 `index.html`
+- 若管理 API 配置了 `api.token`，静态页面仍可直接打开，但页面内对 `/api/v1/*` 的请求必须携带 `api.auth_header` 指定的 header；可在右侧侧栏中填写 token 与 header 名，默认 header 为 `X-GeoLoom-Token`。
+- 推荐的鉴权联调回归步骤：
+  1. 在配置中设置 `api.token` 与 `api.auth_header`，启动 GeoLoom。
+  2. 直接访问根路径 `/`，确认页面可打开，但初始 API 请求返回 401。
+  3. 确认页面出现“鉴权失败，请检查 Token/Header。”且右侧状态为“未连接”。
+  4. 在右侧栏填写正确的 header/token 并保存。
+  5. 确认 `/api/v1/status|sources|nodes|candidates|health` 恢复为 200，页面状态切换为“已连接”。
+- 若你的 API 不在默认地址，可在开发期页面侧栏中修改 `API Base URL`（例如 `http://127.0.0.1:9090`）；嵌入模式下默认留空走同源。
+- 当前前端默认中文，并支持中英切换与亮暗色模式切换。
+
 ### 5) Docker Compose 部署（GHCR 镜像）
 
-> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.3`。
+> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.4`。
 
 1. 准备配置文件（示例）：
 
@@ -295,7 +341,7 @@ GeoLoom version=dev commit=unknown build_time=unknown
 生产构建建议通过 `-ldflags` 注入版本信息：
 
 ```bash
-go build -ldflags "-X main.Version=v0.2.3 -X main.Commit=$(git rev-parse --short HEAD) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/geoloom
+go build -ldflags "-X main.Version=v0.2.4 -X main.Commit=$(git rev-parse --short HEAD) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/geoloom
 ```
 
 ## 多环境打包（build-all）
@@ -303,18 +349,18 @@ go build -ldflags "-X main.Version=v0.2.3 -X main.Commit=$(git rev-parse --short
 ### 一键打包
 
 ```bash
-bash scripts/release/build-all.sh v0.2.3
+bash scripts/release/build-all.sh v0.2.4
 ```
 
 可选参数（按顺序覆盖）：
-- `VERSION`：版本号（默认 `v0.2.3`）
+- `VERSION`：版本号（默认 `v0.2.4`）
 - `COMMIT`：提交短哈希（默认自动读取，失败回退 `unknown`）
 - `BUILD_TIME`：UTC 时间（默认当前时间，ISO8601）
 
 例如：
 
 ```bash
-bash scripts/release/build-all.sh v0.2.3 abc1234 2026-03-05T09:00:00Z
+bash scripts/release/build-all.sh v0.2.4 abc1234 2026-03-05T09:00:00Z
 ```
 
 ### 输出结构

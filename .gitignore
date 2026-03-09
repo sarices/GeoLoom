@@ -47,3 +47,7 @@ configs.sub.txt
 GeoLite2-Country.mmdb
 geoloom
 
+# Frontend
+frontend/node_modules/
+frontend/dist/
+

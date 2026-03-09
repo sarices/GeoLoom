@@ -1,0 +1,109 @@
+@import "tailwindcss";
+
+:root {
+  --font-display: "Avenir Next", "PingFang SC", "Hiragino Sans GB", sans-serif;
+  --font-body: "Iowan Old Style", "Source Han Serif SC", "Noto Serif SC", serif;
+  --bg: #dcefeb;
+  --bg-radial: radial-gradient(circle at top left, rgba(255, 255, 255, 0.9), transparent 24%), radial-gradient(circle at 88% 18%, rgba(18, 179, 154, 0.12), transparent 20%), radial-gradient(circle at bottom right, rgba(128, 203, 196, 0.22), transparent 32%);
+  --shell: rgba(247, 250, 249, 0.82);
+  --shell-strong: rgba(255, 255, 255, 0.96);
+  --card: rgba(255, 255, 255, 0.88);
+  --card-muted: rgba(239, 246, 244, 0.94);
+  --sidebar: rgba(241, 246, 245, 0.94);
+  --text: #173535;
+  --text-soft: #5d7672;
+  --line: rgba(22, 51, 50, 0.08);
+  --accent: #12b39a;
+  --accent-2: #f4c84f;
+  --accent-3: #ef8b5f;
+  --shadow: 0 26px 90px rgba(27, 68, 61, 0.12);
+  --card-shadow: 0 16px 44px rgba(27, 68, 61, 0.05);
+}
+
+:root.dark {
+  --bg: #10201f;
+  --bg-radial: radial-gradient(circle at top left, rgba(39, 83, 79, 0.45), transparent 26%), radial-gradient(circle at 84% 16%, rgba(79, 214, 191, 0.08), transparent 18%), radial-gradient(circle at bottom right, rgba(244, 200, 79, 0.08), transparent 30%);
+  --shell: rgba(16, 31, 30, 0.88);
+  --shell-strong: rgba(21, 39, 38, 0.95);
+  --card: rgba(25, 45, 43, 0.88);
+  --card-muted: rgba(19, 37, 36, 0.94);
+  --sidebar: rgba(17, 32, 31, 0.98);
+  --text: #e8f2ef;
+  --text-soft: #8dafaa;
+  --line: rgba(232, 242, 239, 0.08);
+  --accent: #4fd6bf;
+  --accent-2: #ffd56c;
+  --accent-3: #ff9c73;
+  --shadow: 0 28px 90px rgba(0, 0, 0, 0.34);
+  --card-shadow: 0 18px 48px rgba(0, 0, 0, 0.18);
+}
+
+@theme inline {
+  --color-app-bg: var(--bg);
+  --color-shell: var(--shell);
+  --color-shell-strong: var(--shell-strong);
+  --color-card: var(--card);
+  --color-card-muted: var(--card-muted);
+  --color-sidebar: var(--sidebar);
+  --color-text-main: var(--text);
+  --color-text-soft: var(--text-soft);
+  --color-line-soft: var(--line);
+  --color-accent-main: var(--accent);
+  --color-accent-warm: var(--accent-2);
+  --color-accent-coral: var(--accent-3);
+  --font-display: var(--font-display);
+  --font-body: var(--font-body);
+  --shadow-shell: var(--shadow);
+  --shadow-card-soft: var(--card-shadow);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg-radial), var(--bg);
+  color: var(--text);
+  font-family: var(--font-body);
+}
+
+button,
+input,
+select {
+  font: inherit;
+}
+
+button {
+  cursor: pointer;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 35%, white 65%);
+}
+
+.field {
+  width: 100%;
+  border: 1px solid color-mix(in srgb, var(--line) 88%, transparent 12%);
+  background: color-mix(in srgb, var(--shell-strong) 82%, transparent 18%);
+  color: var(--text);
+  border-radius: 18px;
+  padding: 0.9rem 1rem;
+  outline: none;
+  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+}
+
+.field::placeholder {
+  color: color-mix(in srgb, var(--text-soft) 70%, transparent 30%);
+}
+
+.field:focus {
+  border-color: color-mix(in srgb, var(--accent) 44%, white 56%);
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 12%, transparent 88%);
+}

@@ -16,32 +16,41 @@ type SnapshotProvider interface {
 	HealthPayload() any
 }
 
-// Server 提供最小只读管理 API。
+// Server 提供最小只读管理 API 与嵌入式前端静态页面。
 type Server struct {
-	provider   SnapshotProvider
-	authHeader string
-	token      string
+	provider      SnapshotProvider
+	authHeader    string
+	token         string
+	staticHandler http.Handler
 }
 
 func NewServer(provider SnapshotProvider, authHeader, token string) *Server {
 	return &Server{
-		provider:   provider,
-		authHeader: strings.TrimSpace(authHeader),
-		token:      strings.TrimSpace(token),
+		provider:      provider,
+		authHeader:    strings.TrimSpace(authHeader),
+		token:         strings.TrimSpace(token),
+		staticHandler: newStaticHandler(),
 	}
 }
 
 func (s *Server) Handler() http.Handler {
-	mux := http.NewServeMux()
-	mux.HandleFunc("/api/v1/status", s.handleStatus)
-	mux.HandleFunc("/api/v1/sources", s.handleSources)
-	mux.HandleFunc("/api/v1/nodes", s.handleNodes)
-	mux.HandleFunc("/api/v1/candidates", s.handleCandidates)
-	mux.HandleFunc("/api/v1/health", s.handleHealth)
-	if s.token == "" {
-		return mux
+	apiMux := http.NewServeMux()
+	apiMux.HandleFunc("/api/v1/status", s.handleStatus)
+	apiMux.HandleFunc("/api/v1/sources", s.handleSources)
+	apiMux.HandleFunc("/api/v1/nodes", s.handleNodes)
+	apiMux.HandleFunc("/api/v1/candidates", s.handleCandidates)
+	apiMux.HandleFunc("/api/v1/health", s.handleHealth)
+	apiMux.HandleFunc("/api/v1/", s.handleAPINotFound)
+
+	apiHandler := http.Handler(apiMux)
+	if s.token != "" {
+		apiHandler = s.authMiddleware(apiHandler)
 	}
-	return s.authMiddleware(mux)
+
+	mux := http.NewServeMux()
+	mux.Handle("/api/v1/", apiHandler)
+	mux.Handle("/", s.staticHandler)
+	return mux
 }
 
 func (s *Server) handleStatus(w http.ResponseWriter, _ *http.Request) {
@@ -62,6 +71,10 @@ func (s *Server) handleCandidates(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
 	s.writeJSON(w, http.StatusOK, s.provider.HealthPayload())
+}
+
+func (s *Server) handleAPINotFound(w http.ResponseWriter, _ *http.Request) {
+	s.writeJSON(w, http.StatusNotFound, map[string]string{"error": "not found"})
 }
 
 func (s *Server) authMiddleware(next http.Handler) http.Handler {

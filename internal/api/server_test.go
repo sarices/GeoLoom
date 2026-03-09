@@ -2,8 +2,10 @@ package api
 
 import (
 	"encoding/json"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -119,5 +121,75 @@ func TestServerUnauthorizedPayloadShape(t *testing.T) {
 	}
 	if body["error"] != "unauthorized" {
 		t.Fatalf("错误响应体不符合预期: %+v", body)
+	}
+}
+
+func TestStaticRouteShouldServeIndexHTML(t *testing.T) {
+	t.Parallel()
+	server := NewServer(fakeProvider{}, "", "")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("状态码错误: got=%d", resp.Code)
+	}
+	if contentType := resp.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("Content-Type 错误: got=%s", contentType)
+	}
+	if cacheControl := resp.Header().Get("Cache-Control"); cacheControl != "no-cache" {
+		t.Fatalf("Cache-Control 错误: got=%s", cacheControl)
+	}
+}
+
+func TestStaticRouteShouldFallbackForSPAPath(t *testing.T) {
+	t.Parallel()
+	server := NewServer(fakeProvider{}, "", "")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/dashboard/health", nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("状态码错误: got=%d", resp.Code)
+	}
+	if contentType := resp.Header().Get("Content-Type"); !strings.Contains(contentType, "text/html") {
+		t.Fatalf("Content-Type 错误: got=%s", contentType)
+	}
+}
+
+func TestAPIUnknownPathShouldNotFallbackToSPA(t *testing.T) {
+	t.Parallel()
+	server := NewServer(fakeProvider{}, "", "")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, "/api/v1/unknown", nil))
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("状态码错误: got=%d want=%d", resp.Code, http.StatusNotFound)
+	}
+	if contentType := resp.Header().Get("Content-Type"); contentType != "application/json; charset=utf-8" {
+		t.Fatalf("Content-Type 错误: got=%s", contentType)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(resp.Body.Bytes(), &body); err != nil {
+		t.Fatalf("解析 JSON 失败: %v", err)
+	}
+	if body["error"] != "not found" {
+		t.Fatalf("响应体错误: %+v", body)
+	}
+}
+
+func TestStaticAssetShouldUseImmutableCacheWhenPresent(t *testing.T) {
+	t.Parallel()
+	assets, err := fs.Glob(frontendDist, "frontenddist/assets/*")
+	if err != nil {
+		t.Fatalf("枚举 assets 失败: %v", err)
+	}
+	if len(assets) == 0 {
+		t.Fatal("未找到可用前端 assets")
+	}
+	assetPath := strings.TrimPrefix(assets[0], "frontenddist")
+	server := NewServer(fakeProvider{}, "", "")
+	resp := httptest.NewRecorder()
+	server.Handler().ServeHTTP(resp, httptest.NewRequest(http.MethodGet, assetPath, nil))
+	if resp.Code != http.StatusOK {
+		t.Fatalf("状态码错误: got=%d path=%s", resp.Code, assetPath)
+	}
+	if resp.Header().Get("Cache-Control") != "public, max-age=31536000, immutable" {
+		t.Fatalf("Cache-Control 错误: got=%s", resp.Header().Get("Cache-Control"))
 	}
 }

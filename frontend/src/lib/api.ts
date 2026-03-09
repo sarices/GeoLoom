@@ -1,0 +1,174 @@
+export type StatusResponse = {
+  version: string
+  started_at: string
+  last_refresh_at: string
+  source_count: number
+  strategy: string
+  raw_node_count: number
+  deduped_node_count: number
+  resolved_node_count: number
+  candidate_node_count: number
+  dropped_node_count: number
+  core_supported_count: number
+  core_unsupported_count: number
+  refresh: { enabled: boolean; interval: string }
+  api: { enabled: boolean; listen: string }
+  state: { enabled: boolean; path: string }
+}
+
+export type SourcesResponse = {
+  items: Array<{
+    name: string
+    type: string
+    url: string
+    normalized_url: string
+    input_type: string
+    node_count: number
+    unsupported_count: number
+    success: boolean
+    error?: string
+    updated_at: string
+  }>
+}
+
+export type NodeItem = {
+  id: string
+  fingerprint: string
+  name: string
+  source_names: string[]
+  country_code: string
+  protocol: string
+  address: string
+  port: number
+  last_checked: string
+  raw_config: Record<string, unknown>
+}
+
+export type NodesResponse = {
+  count: number
+  items: NodeItem[]
+}
+
+export type HealthResponse = {
+  config: {
+    enabled: boolean
+    interval: string
+    url: string
+  }
+  summary: {
+    tracked_nodes: number
+    penalized_nodes: number
+    last_rebuild_at: string
+  }
+  health: {
+    interval: number
+    debounce: number
+    test_url: string
+    timeout: number
+    last_candidates: string[]
+    last_rebuild_at: string
+    nodes: Record<string, { last_check_at: string; last_reachable: boolean }>
+  }
+  penalty_pool: Record<string, string>
+}
+
+export type ApiSnapshot = {
+  status: StatusResponse
+  sources: SourcesResponse
+  nodes: NodesResponse
+  candidates: NodesResponse
+  health: HealthResponse
+}
+
+export type ConnectionSettings = {
+  baseUrl: string
+  token: string
+  authHeader: string
+}
+
+const STORAGE_KEY = 'geoloom-connection'
+
+const defaultConnection: ConnectionSettings = {
+  baseUrl: '',
+  token: '',
+  authHeader: 'X-GeoLoom-Token',
+}
+
+export function loadConnectionSettings(): ConnectionSettings {
+  if (typeof window === 'undefined') {
+    return defaultConnection
+  }
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY)
+    if (!raw) {
+      return defaultConnection
+    }
+    const parsed = JSON.parse(raw) as Partial<ConnectionSettings>
+    return {
+      baseUrl: typeof parsed.baseUrl === 'string' ? parsed.baseUrl : '',
+      token: typeof parsed.token === 'string' ? parsed.token : '',
+      authHeader: typeof parsed.authHeader === 'string' && parsed.authHeader.trim() !== '' ? parsed.authHeader : 'X-GeoLoom-Token',
+    }
+  } catch {
+    return defaultConnection
+  }
+}
+
+export function saveConnectionSettings(settings: ConnectionSettings) {
+  if (typeof window === 'undefined') {
+    return
+  }
+  window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings))
+}
+
+class ApiError extends Error {
+  status: number
+
+  constructor(message: string, status: number) {
+    super(message)
+    this.status = status
+  }
+}
+
+function withBase(baseUrl: string, path: string) {
+  const normalizedBase = baseUrl.trim().replace(/\/$/, '')
+  return normalizedBase ? `${normalizedBase}${path}` : path
+}
+
+async function requestJson<T>(path: string, settings: ConnectionSettings): Promise<T> {
+  const headers = new Headers()
+  if (settings.token.trim() !== '') {
+    headers.set(settings.authHeader.trim() || 'X-GeoLoom-Token', settings.token.trim())
+  }
+
+  const response = await fetch(withBase(settings.baseUrl, path), { headers })
+  if (!response.ok) {
+    let message = `HTTP ${response.status}`
+    try {
+      const payload = (await response.json()) as { error?: string }
+      if (payload.error) {
+        message = payload.error
+      }
+    } catch {
+      // ignore
+    }
+    throw new ApiError(message, response.status)
+  }
+  return (await response.json()) as T
+}
+
+export async function fetchSnapshot(settings: ConnectionSettings): Promise<ApiSnapshot> {
+  const [status, sources, nodes, candidates, health] = await Promise.all([
+    requestJson<StatusResponse>('/api/v1/status', settings),
+    requestJson<SourcesResponse>('/api/v1/sources', settings),
+    requestJson<NodesResponse>('/api/v1/nodes', settings),
+    requestJson<NodesResponse>('/api/v1/candidates', settings),
+    requestJson<HealthResponse>('/api/v1/health', settings),
+  ])
+
+  return { status, sources, nodes, candidates, health }
+}
+
+export function isUnauthorizedError(error: unknown) {
+  return error instanceof ApiError && error.status === 401
+}
