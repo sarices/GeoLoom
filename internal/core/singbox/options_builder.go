@@ -248,6 +248,32 @@ func buildNodeOutbound(node domain.NodeMetadata, index int, tagSeen map[string]i
 			options.Password = password
 		}
 		return option.Outbound{Type: C.TypeSOCKS, Tag: tag, Options: options}, nil
+	case "socks4":
+		options := &option.SOCKSOutboundOptions{
+			ServerOptions: option.ServerOptions{
+				Server:     server,
+				ServerPort: serverPort,
+			},
+			Version: "4",
+		}
+		if username, ok := readString(node.RawConfig, "username"); ok {
+			options.Username = username
+		}
+		return option.Outbound{Type: C.TypeSOCKS, Tag: tag, Options: options}, nil
+	case "http":
+		options := &option.HTTPOutboundOptions{
+			ServerOptions: option.ServerOptions{
+				Server:     server,
+				ServerPort: serverPort,
+			},
+		}
+		if username, ok := readString(node.RawConfig, "username"); ok {
+			options.Username = username
+		}
+		if password, ok := readString(node.RawConfig, "password"); ok {
+			options.Password = password
+		}
+		return option.Outbound{Type: C.TypeHTTP, Tag: tag, Options: options}, nil
 	case "hysteria2":
 		options := &option.Hysteria2OutboundOptions{
 			ServerOptions: option.ServerOptions{

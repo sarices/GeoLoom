@@ -91,6 +91,57 @@ func TestBuildNodeFingerprintNormalizeCase(t *testing.T) {
 	}
 }
 
+func TestBuildNodeFingerprintSocks4AndHTTP(t *testing.T) {
+	t.Parallel()
+
+	socks4 := NodeMetadata{Protocol: "socks4", Address: "1.1.1.1", Port: 1080, RawConfig: map[string]any{"username": "legacy"}}
+	httpNode := NodeMetadata{Protocol: "http", Address: "1.1.1.1", Port: 8080, RawConfig: map[string]any{"username": "user", "password": "pass"}}
+
+	socks4FP, err := BuildNodeFingerprint(socks4)
+	if err != nil {
+		t.Fatalf("socks4 fingerprint 构建失败: %v", err)
+	}
+	httpFP, err := BuildNodeFingerprint(httpNode)
+	if err != nil {
+		t.Fatalf("http fingerprint 构建失败: %v", err)
+	}
+	if socks4FP == "" || httpFP == "" {
+		t.Fatalf("fingerprint 不应为空: socks4=%q http=%q", socks4FP, httpFP)
+	}
+	if socks4FP == httpFP {
+		t.Fatalf("不同协议 fingerprint 不应相同: socks4=%s http=%s", socks4FP, httpFP)
+	}
+}
+
+func TestBuildNodeFingerprintHTTPIgnoreName(t *testing.T) {
+	t.Parallel()
+
+	left := NodeMetadata{
+		Name:     "dup-a",
+		Protocol: "http",
+		Address:  "1.1.1.1",
+		Port:     8080,
+		RawConfig: map[string]any{
+			"username": "user",
+			"password": "pass",
+		},
+	}
+	right := left
+	right.Name = "dup-b"
+
+	leftFP, err := BuildNodeFingerprint(left)
+	if err != nil {
+		t.Fatalf("left fingerprint 构建失败: %v", err)
+	}
+	rightFP, err := BuildNodeFingerprint(right)
+	if err != nil {
+		t.Fatalf("right fingerprint 构建失败: %v", err)
+	}
+	if leftFP != rightFP {
+		t.Fatalf("HTTP 节点名称不应影响 fingerprint: left=%s right=%s", leftFP, rightFP)
+	}
+}
+
 func TestBuildNodeFingerprintOptionalFieldsEmpty(t *testing.T) {
 	t.Parallel()
 

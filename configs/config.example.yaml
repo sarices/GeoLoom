@@ -1,40 +1,120 @@
 # GeoLoom 示例配置（可复制为 config.yaml 后按需修改）
+#
+# 说明：
+# - 本文件只包含当前程序实际支持的配置字段。
+# - `sources` 支持三种 type：`source` / `subscribe` / `node`。
+# - `source` 与 `subscribe` 当前都会按“输入源”处理；保留 `subscribe` 主要是兼容历史写法。
+# - 顶层 `http://` / `https://` 在 `type: source|subscribe` 下表示远程订阅 URL，
+#   不是 HTTP 代理节点；若要表达 HTTP 代理节点，请写在 source 内容里，或使用 `type: node`。
 
 gateway:
-  # 当前版本实际使用 socks_port 作为统一入口。
+  # 保留字段：当前版本核心统一使用 socks_port 作为对外代理入口。
+  # http_port 目前主要用于配置完整性与后续扩展，不能与 socks_port 相同。
   http_port: 8080
   socks_port: 1080
 
 policy:
   # 可选：random / urltest
+  # - random：连接级随机选择候选节点
+  # - urltest：基于探测结果选择候选节点
   strategy: random
+
   filter:
+    # ISO 3166-1 Alpha-2 国家代码白名单；为空表示不过滤。
+    # 示例：allow: [HK, SG, JP]
     allow: []
+
+    # ISO 3166-1 Alpha-2 国家代码黑名单；block 优先级高于 allow。
+    # 示例：block: [CN, RU]
     block: []
+
   health_check:
+    # 是否启用健康检查与失败惩罚窗口。
     enabled: true
+
+    # 健康检查周期，必须是合法 Go duration，例如 30s / 5m / 1h。
     interval: 5m
+
+    # 探测 URL，仅支持 http/https。
     url: http://cp.cloudflare.com
+
   refresh:
+    # 是否启用周期刷新 source。
     enabled: true
+
+    # source 刷新周期，必须是合法 Go duration。
     interval: 10m
 
 geo:
+  # MaxMind MMDB 显式路径；为空时进入默认查找/下载逻辑。
+  # 相对路径相对 `-config` 指定配置文件所在目录解析。
   mmdb_path: ""
+
+  # 当 mmdb_path 为空且程序目录不存在 GeoLite2-Country.mmdb 时，
+  # 使用该地址自动下载（仅支持 http/https）。不需要自动下载时可留空。
   mmdb_url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
+
+  # DNS 解析超时，必须是合法 Go duration。
   dns_timeout: 3s
 
 api:
+  # 是否启用本地只读管理 API。
   enabled: true
+
+  # 建议仅监听回环地址；未做额外保护时不要直接暴露公网。
   listen: 127.0.0.1:9090
+
+  # 静态 token；为空时不启用鉴权。
   token: ""
+
+  # 启用 token 时要求客户端携带的请求头名称。
   auth_header: X-GeoLoom-Token
 
 state:
+  # 是否启用运行时状态持久化（惩罚窗口、最近健康状态、最近国家识别结果）。
   enabled: true
+
+  # 本地状态文件路径；相对路径相对当前工作目录。
   path: geoloom-state.json
 
 sources:
+  # 1) type: source
+  # 远程或本地输入源。支持：
+  # - http:// / https:// 远程订阅
+  # - @本地文件路径
+  # - 裸文件路径（相对 config 文件目录解析）
+  # 远程内容优先兼容 URI 列表 / Base64 URI 列表 / Clash YAML / Sing-box JSON；
+  # 若正文是逐行文本文件，也会自动按逐行规则解析。
+  - name: remote-source
+    type: source
+    url: "https://example.com/subscribe?token=YOUR_TOKEN"
+
+  # 2) type: source（本地文件）
+  # 本地文本文件支持：
+  # - 空行 / 注释行忽略
+  # - 显式 socks5:// / socks4:// / http:// 等协议条目
+  # - 裸 host:port[#name] 默认补成 socks5://
   - name: local-file
     type: source
     url: "sub.txt"
+
+  # 3) type: subscribe
+  # 与 source 同属“输入源”语义，当前主要用于兼容历史配置。
+  - name: subscribe-alias
+    type: subscribe
+    url: "@./providers/mixed-proxies.txt"
+
+  # 4) type: node
+  # 直接声明单个节点链接，不经过远程 source 抓取。
+  # 当前已支持最小字段子集：
+  # hysteria2:// / socks5:// / socks4:// / vless:// / trojan:// / vmess:// / ss://
+  - name: manual-node-socks5
+    type: node
+    url: "socks5://user:pass@203.0.113.10:1080#manual-socks5"
+
+  # 5) type: node（额外示例）
+  # 若要使用 HTTP 代理节点，建议放在 source 文本内容里使用显式 http:// 条目；
+  # 顶层 type=node 当前不建议直接写 http://，避免与远程 source URL 语义混淆。
+  - name: manual-node-vless
+    type: node
+    url: "vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com#manual-vless"

@@ -126,6 +126,135 @@ func TestFetchSubscriptionFromLocalFileWithDefaultSocks5(t *testing.T) {
 	}
 }
 
+func TestFetchSubscriptionRemoteTextFallbackToLineParsing(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("\n# comment\n1.1.1.1:1080#hk\nsocks4://legacy@1.1.1.2:1080#legacy\nhttp://user:pass@1.1.1.3:8080#web\n1.1.1.1:1080#hk\n"))
+	}))
+	defer ts.Close()
+
+	fetcher := NewSubscriptionFetcher(&http.Client{Timeout: 3 * time.Second})
+	result, err := fetcher.FetchResult(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("FetchResult 返回错误: %v", err)
+	}
+
+	want := []string{"socks5://1.1.1.1:1080#hk", "socks4://legacy@1.1.1.2:1080#legacy", "http://user:pass@1.1.1.3:8080#web"}
+	if !reflect.DeepEqual(result.Entries, want) {
+		t.Fatalf("远程文本 fallback 结果不匹配: got=%v want=%v", result.Entries, want)
+	}
+}
+
+func TestFetchSubscriptionRemoteBase64KeepsOriginalExtractionPriority(t *testing.T) {
+	t.Parallel()
+
+	raw := "socks5://guest:pass@2.2.2.2:1080#s1\nhttp://user:pass@3.3.3.3:8080#web"
+	encoded := base64.StdEncoding.EncodeToString([]byte(raw))
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(encoded))
+	}))
+	defer ts.Close()
+
+	fetcher := NewSubscriptionFetcher(&http.Client{Timeout: 3 * time.Second})
+	result, err := fetcher.FetchResult(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("FetchResult 返回错误: %v", err)
+	}
+
+	want := []string{"socks5://guest:pass@2.2.2.2:1080#s1", "http://user:pass@3.3.3.3:8080#web"}
+	if !reflect.DeepEqual(result.Entries, want) {
+		t.Fatalf("Base64 提取结果不匹配: got=%v want=%v", result.Entries, want)
+	}
+}
+
+func TestFetchSubscriptionRemoteTextOnlyCommentsShouldStayEmpty(t *testing.T) {
+	t.Parallel()
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte("\n# comment\n   \n# comment 2\n"))
+	}))
+	defer ts.Close()
+
+	fetcher := NewSubscriptionFetcher(&http.Client{Timeout: 3 * time.Second})
+	result, err := fetcher.FetchResult(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("FetchResult 返回错误: %v", err)
+	}
+	if len(result.Entries) != 0 {
+		t.Fatalf("仅注释远程文本应保持空 entries: got=%v", result.Entries)
+	}
+}
+
+func TestFetchSubscriptionRemoteProxyListFixture(t *testing.T) {
+	t.Parallel()
+
+	fixturePath := filepath.Join("..", "..", "..", "test", "fixtures", "remote-proxy-list.txt")
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("读取 fixture 失败: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(content)
+	}))
+	defer ts.Close()
+
+	fetcher := NewSubscriptionFetcher(&http.Client{Timeout: 3 * time.Second})
+	result, err := fetcher.FetchResult(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("FetchResult 返回错误: %v", err)
+	}
+
+	want := []string{
+		"socks5://72.49.49.11:31034",
+		"socks5://66.42.224.229:41679",
+		"socks4://legacy@192.111.139.163:4145#legacy-us",
+		"http://user:pass@8.210.17.35:3128#http-sg",
+		"http://198.199.86.11:8080#http-open",
+		"socks5://guest:pass@98.178.72.21:10919#socks5-auth",
+		"socks5://user2:pass2@203.0.113.10:1080#bare-auth",
+	}
+	if !reflect.DeepEqual(result.Entries, want) {
+		t.Fatalf("proxifly-like fixture 解析结果不匹配: got=%v want=%v", result.Entries, want)
+	}
+}
+
+func TestFetchSubscriptionRemoteProxyListDirtyFixture(t *testing.T) {
+	t.Parallel()
+
+	fixturePath := filepath.Join("..", "..", "..", "test", "fixtures", "remote-proxy-list-dirty.txt")
+	content, err := os.ReadFile(fixturePath)
+	if err != nil {
+		t.Fatalf("读取 dirty fixture 失败: %v", err)
+	}
+
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(content)
+	}))
+	defer ts.Close()
+
+	fetcher := NewSubscriptionFetcher(&http.Client{Timeout: 3 * time.Second})
+	result, err := fetcher.FetchResult(context.Background(), ts.URL)
+	if err != nil {
+		t.Fatalf("FetchResult 返回错误: %v", err)
+	}
+
+	want := []string{
+		"SOCKS5://9.9.9.9:1080#upper-socks",
+		"http://1.1.1.1:8080#dup-a",
+		"http://1.1.1.1:8080#dup-b",
+		"ftp://unsupported.example:21#ftp",
+		"socks4://legacy@2.2.2.2:99999#bad-port",
+		"http://user%zz@3.3.3.3:8080#bad-uri",
+		"socks5://user:pass@4.4.4.4:1080#bare-auth",
+		"HTTPS://should-stay-unsupported.example.com/path",
+	}
+	if !reflect.DeepEqual(result.Entries, want) {
+		t.Fatalf("dirty fixture 解析结果不匹配: got=%v want=%v", result.Entries, want)
+	}
+}
+
 func TestFetchSubscriptionStatusError(t *testing.T) {
 	t.Parallel()
 

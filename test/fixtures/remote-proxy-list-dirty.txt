@@ -1,0 +1,13 @@
+# dirty remote proxy list fixture
+# covers invalid port, invalid URI, unsupported scheme, alias duplicates, scheme case, and whitespace noise
+
+   SOCKS5://9.9.9.9:1080#upper-socks
+http://1.1.1.1:8080#dup-a
+http://1.1.1.1:8080#dup-b
+ftp://unsupported.example:21#ftp
+socks4://legacy@2.2.2.2:99999#bad-port
+http://user%zz@3.3.3.3:8080#bad-uri
+   user:pass@4.4.4.4:1080#bare-auth
+
+HTTPS://should-stay-unsupported.example.com/path
+

@@ -30,6 +30,15 @@ func BuildNodeFingerprint(node NodeMetadata) (string, error) {
 			"username="+normalizeString(raw["username"]),
 			"password="+normalizeString(raw["password"]),
 		)
+	case "socks4":
+		parts = append(parts,
+			"username="+normalizeString(raw["username"]),
+		)
+	case "http":
+		parts = append(parts,
+			"username="+normalizeString(raw["username"]),
+			"password="+normalizeString(raw["password"]),
+		)
 	case "hysteria2":
 		parts = append(parts,
 			"password="+normalizeString(raw["password"]),

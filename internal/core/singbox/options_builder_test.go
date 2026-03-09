@@ -359,6 +359,66 @@ func TestOptionsBuilderBuildNewProtocols(t *testing.T) {
 	}
 }
 
+func TestOptionsBuilderBuildSocks4AndHTTP(t *testing.T) {
+	t.Parallel()
+
+	builder := NewOptionsBuilder()
+	cfg := config.Config{Gateway: config.GatewayConfig{SocksPort: 1080}}
+	nodes := []domain.NodeMetadata{
+		{
+			ID:       "socks4-node",
+			Protocol: "socks4",
+			Address:  "1.1.1.1",
+			Port:     1080,
+			RawConfig: map[string]any{
+				"type":        "socks4",
+				"server":      "1.1.1.1",
+				"server_port": 1080,
+				"username":    "legacy",
+			},
+		},
+		{
+			ID:       "http-node",
+			Protocol: "http",
+			Address:  "2.2.2.2",
+			Port:     8080,
+			RawConfig: map[string]any{
+				"type":        "http",
+				"server":      "2.2.2.2",
+				"server_port": 8080,
+				"username":    "user",
+				"password":    "pass",
+			},
+		},
+	}
+
+	options, err := builder.Build(cfg, nodes)
+	if err != nil {
+		t.Fatalf("Build 返回错误: %v", err)
+	}
+
+	socksOutbound, ok := options.Outbounds[0].Options.(*option.SOCKSOutboundOptions)
+	if !ok {
+		t.Fatalf("socks4 outbound 类型错误: %T", options.Outbounds[0].Options)
+	}
+	if socksOutbound.Version != "4" {
+		t.Fatalf("socks4 version 错误: got=%q", socksOutbound.Version)
+	}
+
+	httpOutbound, ok := options.Outbounds[1].Options.(*option.HTTPOutboundOptions)
+	if !ok {
+		t.Fatalf("http outbound 类型错误: %T", options.Outbounds[1].Options)
+	}
+	if httpOutbound.Username != "user" || httpOutbound.Password != "pass" {
+		t.Fatalf("http 鉴权字段错误: %+v", httpOutbound)
+	}
+
+	stats := builder.LastBuildStats()
+	if stats.SupportedCandidates != 2 {
+		t.Fatalf("supported candidates 错误: got=%d want=2", stats.SupportedCandidates)
+	}
+}
+
 func TestEnsureRegistryContextRegistersGeoloomRandomOptions(t *testing.T) {
 	t.Parallel()
 

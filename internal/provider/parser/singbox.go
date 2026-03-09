@@ -21,6 +21,7 @@ type singboxOutbound struct {
 	Password   string `json:"password"`
 	Method     string `json:"method"`
 	Username   string `json:"username"`
+	Version    string `json:"version"`
 	TLS        *struct {
 		ServerName string   `json:"server_name"`
 		Enabled    bool     `json:"enabled"`
@@ -90,6 +91,14 @@ func mapSingboxOutbound(outbound singboxOutbound) (domain.NodeMetadata, error) {
 	}
 	switch protocol {
 	case "socks":
+		version := strings.TrimSpace(outbound.Version)
+		if version == "4" || strings.EqualFold(version, "socks4") {
+			raw["type"] = "socks4"
+			if outbound.Username != "" {
+				raw["username"] = strings.TrimSpace(outbound.Username)
+			}
+			return domain.NodeMetadata{ID: buildNodeID("socks4", host, outbound.ServerPort, outbound.Username), Name: name, Protocol: "socks4", Address: host, Port: outbound.ServerPort, RawConfig: raw}, nil
+		}
 		raw["type"] = "socks5"
 		if outbound.Username != "" {
 			raw["username"] = strings.TrimSpace(outbound.Username)
@@ -98,6 +107,14 @@ func mapSingboxOutbound(outbound singboxOutbound) (domain.NodeMetadata, error) {
 			raw["password"] = strings.TrimSpace(outbound.Password)
 		}
 		return domain.NodeMetadata{ID: buildNodeID("socks5", host, outbound.ServerPort, outbound.Username+":"+outbound.Password), Name: name, Protocol: "socks5", Address: host, Port: outbound.ServerPort, RawConfig: raw}, nil
+	case "http":
+		if outbound.Username != "" {
+			raw["username"] = strings.TrimSpace(outbound.Username)
+		}
+		if outbound.Password != "" {
+			raw["password"] = strings.TrimSpace(outbound.Password)
+		}
+		return domain.NodeMetadata{ID: buildNodeID("http", host, outbound.ServerPort, outbound.Username+":"+outbound.Password), Name: name, Protocol: "http", Address: host, Port: outbound.ServerPort, RawConfig: raw}, nil
 	case "trojan":
 		raw["password"] = strings.TrimSpace(outbound.Password)
 		return domain.NodeMetadata{ID: buildNodeID("trojan", host, outbound.ServerPort, outbound.Password), Name: name, Protocol: "trojan", Address: host, Port: outbound.ServerPort, RawConfig: raw}, nil

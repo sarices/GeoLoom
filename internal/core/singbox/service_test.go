@@ -3,6 +3,7 @@ package singbox
 import (
 	"context"
 	"errors"
+	"net"
 	"testing"
 
 	"geoloom/internal/config"
@@ -176,6 +177,66 @@ func TestServiceStartWithUnsupportedSubset(t *testing.T) {
 	}
 }
 
+func TestServiceStartWithRealHTTPAndSocks4Outbounds(t *testing.T) {
+	t.Parallel()
+
+	listen, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("申请测试端口失败: %v", err)
+	}
+	socksPort := listen.Addr().(*net.TCPAddr).Port
+	if closeErr := listen.Close(); closeErr != nil {
+		t.Fatalf("释放测试端口失败: %v", closeErr)
+	}
+
+	service := NewService(context.Background(), NewOptionsBuilder())
+	nodes := []domain.NodeMetadata{
+		{
+			ID:       "socks4-node",
+			Protocol: "socks4",
+			Address:  "127.0.0.1",
+			Port:     4145,
+			RawConfig: map[string]any{
+				"type":        "socks4",
+				"server":      "127.0.0.1",
+				"server_port": 4145,
+				"username":    "legacy",
+			},
+		},
+		{
+			ID:       "http-node",
+			Protocol: "http",
+			Address:  "127.0.0.1",
+			Port:     8080,
+			RawConfig: map[string]any{
+				"type":        "http",
+				"server":      "127.0.0.1",
+				"server_port": 8080,
+				"username":    "user",
+				"password":    "pass",
+			},
+		},
+	}
+
+	cfg := config.Config{Gateway: config.GatewayConfig{SocksPort: socksPort}}
+	if err := service.Start(cfg, nodes); err != nil {
+		t.Fatalf("真实 HTTP/SOCKS4 outbound 启动失败: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := service.Close(); err != nil {
+			t.Fatalf("Close 返回错误: %v", err)
+		}
+	})
+
+	stats := service.LastBuildStats()
+	if stats.SupportedCandidates != 2 {
+		t.Fatalf("supported candidates 错误: got=%d want=2", stats.SupportedCandidates)
+	}
+	if len(stats.Unsupported) != 0 {
+		t.Fatalf("unsupported 数量错误: got=%d want=0", len(stats.Unsupported))
+	}
+}
+
 func TestServiceEnsureRegistryContext(t *testing.T) {
 	t.Parallel()
 
@@ -192,6 +253,13 @@ func TestServiceEnsureRegistryContext(t *testing.T) {
 		t.Fatalf("未注册 geoloom random type: %s", geoloomRandomOutboundType)
 	} else if _, typeOK := created.(*geoloomRandomOutboundOptions); !typeOK {
 		t.Fatalf("geoloom random options 类型错误: %T", created)
+	}
+	if registry := service.FromContext[option.OutboundOptionsRegistry](ctx); registry == nil {
+		t.Fatal("缺少 OutboundOptionsRegistry")
+	} else if created, ok := registry.CreateOptions("http"); !ok {
+		t.Fatal("未注册 http outbound options")
+	} else if _, typeOK := created.(*option.HTTPOutboundOptions); !typeOK {
+		t.Fatalf("http outbound options 类型错误: %T", created)
 	}
 
 	service := NewService(ctx, NewOptionsBuilder())

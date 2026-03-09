@@ -98,7 +98,15 @@ func (f *SubscriptionFetcher) FetchResult(ctx context.Context, sourceURL string)
 		return FetchResult{}, fmt.Errorf("读取订阅内容失败: %w", err)
 	}
 
-	return FetchResult{Content: body, Entries: ParseEntriesFromContent(body)}, nil
+	entries := ParseEntriesFromContent(body)
+	lineEntries := parseEntriesFromLines(string(body))
+	if len(lineEntries) > len(entries) {
+		entries = lineEntries
+	} else if len(entries) == 0 {
+		entries = lineEntries
+	}
+
+	return FetchResult{Content: body, Entries: entries}, nil
 }
 
 // ParseEntriesFromContent 从订阅文本中提取可处理的链接。

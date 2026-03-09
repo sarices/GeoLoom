@@ -1,0 +1,19 @@
+# proxifly-like mixed proxy list fixture
+# blank lines, comments, duplicates, bare auth lines, and mixed schemes
+
+72.49.49.11:31034
+66.42.224.229:41679
+
+# duplicate bare line should be deduped at source entry extraction stage
+72.49.49.11:31034
+
+socks4://legacy@192.111.139.163:4145#legacy-us
+http://user:pass@8.210.17.35:3128#http-sg
+http://198.199.86.11:8080#http-open
+socks5://guest:pass@98.178.72.21:10919#socks5-auth
+
+# bare auth line should still default to socks5
+user2:pass2@203.0.113.10:1080#bare-auth
+
+# duplicate explicit line should be deduped
+http://198.199.86.11:8080#http-open

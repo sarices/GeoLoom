@@ -15,10 +15,12 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 - `node` 输入（最小字段子集）：
   - `hysteria2://`
   - `socks5://`
+  - `socks4://`
   - `vless://`
   - `trojan://`
   - `vmess://`
   - `ss://`
+- `source` 内容扩展：支持 URI 列表、Clash YAML、Sing-box JSON，以及远程/本地逐行文本文件。
 
 ### Geo + Filter
 - DNS 解析目标地址
@@ -507,9 +509,10 @@ go run ./cmd/geoloom -config configs/config.yaml
 
 ## 配置说明（示例）
 
-参考 `configs/config.yaml`：
+参考 `configs/config.example.yaml`：
 
 ```yaml
+# 字段释义详见 configs/config.example.yaml；下面保留一份常用示例。
 gateway:
   http_port: 8080
   socks_port: 1080
@@ -520,17 +523,16 @@ policy:
     allow: []
     block: []
   health_check:
-    enabled: false
+    enabled: true
     interval: 5m
     url: http://cp.cloudflare.com
-
   refresh:
     enabled: true
     interval: 10m
 
 geo:
   mmdb_path: ""
-  mmdb_url: ""
+  mmdb_url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/geoip@release/GeoLite2-Country.mmdb"
   dns_timeout: 3s
 
 api:
@@ -544,12 +546,34 @@ state:
   path: geoloom-state.json
 
 sources:
-  - name: local-source
+  - name: remote-source
+    type: source
+    url: "https://example.com/subscribe?token=YOUR_TOKEN"
+
+  - name: local-file
     type: source
     url: "sub.txt"
+
+  - name: subscribe-alias
+    type: subscribe
+    url: "@./providers/mixed-proxies.txt"
+
+  - name: manual-node-socks5
+    type: node
+    url: "socks5://user:pass@203.0.113.10:1080#manual-socks5"
+
+  - name: manual-node-vless
+    type: node
+    url: "vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none&security=tls&sni=example.com#manual-vless"
 ```
 
-生产环境参考模板：`configs/config.example.prod.yaml`（默认开启健康检查）。
+说明：
+- `sources.type` 支持 `source` / `subscribe` / `node`。
+- `source` 与 `subscribe` 当前都按“输入源”处理；`subscribe` 主要用于兼容历史写法。
+- 顶层 `type: source|subscribe` 下的 `http://` / `https://` 表示远程 source URL，不是 HTTP 代理节点。
+- 若要表达 HTTP 代理节点，建议写在 source 文本内容里使用显式 `http://user:pass@host:port#name` 条目。
+
+生产环境参考模板：`configs/config.example.prod.yaml`（默认启用健康检查、API 与状态持久化）。
 
 ### source 裸文件路径行为
 当 `type: source` 且 `url` 不带 scheme、也不以 `@` 开头时：
@@ -563,6 +587,41 @@ sources:
   - name: local-list
     type: source
     url: "socks5_share_200.txt"
+```
+
+### source 文本文件解析行为
+本地文件与远程 `http/https` source 在文本文件语义上保持一致：
+- 空行与以 `#` 开头的注释行会被忽略。
+- 显式协议条目会原样保留，当前支持常见的 `socks5://`、`socks4://`、`http://` 等节点条目。
+- 裸行（如 `1.2.3.4:1080#name`、`user:pass@1.2.3.4:1080#name`）会默认补全为 `socks5://`。
+- 对远程 `http/https` source，仍优先兼容现有 URI 列表、Base64 URI 列表、Clash YAML、Sing-box JSON；若正文是逐行文本文件，GeoLoom 会自动按逐行规则补齐与解析。
+
+注意：
+- 顶层配置里的 `http://` / `https://` 仍表示远程 source URL。
+- 若要在 source 内容里表达 HTTP 代理节点，必须写成显式 `http://user:pass@host:port#name` 条目。
+- 裸 `host:port` 不会自动猜测为 `socks4/http`，仍按 `socks5` 处理。
+- source 层会尽量保留逐行文本里的原始条目；非法端口、非法 URI、未知 scheme 等脏数据通常会在 parser/dispatcher 层进入 `unsupported`，而不是在 source 层静默丢弃。
+- 同地址同认证但仅 `#name` 不同的条目，在 source/parser 阶段会分别保留；进入 `domain.DedupNodes` 后，`name` 不参与节点身份判断，最终会按协议关键字段合并，并保留首条记录的名称。
+
+远程文本文件示例：
+
+```yaml
+sources:
+  - name: remote-mixed-text
+    type: source
+    url: "https://example.com/nodes.txt"
+```
+
+示例文件内容：
+
+```text
+# 默认按 socks5 处理
+1.2.3.4:1080#default-socks5
+
+# 显式协议
+socks5://user:pass@5.6.7.8:1080#socks5-node
+socks4://legacy@9.9.9.9:1080#legacy-node
+http://user:pass@8.8.8.8:8080#http-node
 ```
 
 ### geo.mmdb_path / geo.mmdb_url 默认行为

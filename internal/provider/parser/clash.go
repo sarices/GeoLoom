@@ -75,6 +75,21 @@ func mapClashProxy(proxy clashProxy) (domain.NodeMetadata, error) {
 			raw["password"] = strings.TrimSpace(proxy.Password)
 		}
 		return domain.NodeMetadata{ID: buildNodeID("socks5", host, proxy.Port, proxy.Username+":"+proxy.Password), Name: name, Protocol: "socks5", Address: host, Port: proxy.Port, RawConfig: raw}, nil
+	case "socks4":
+		raw := map[string]any{"type": "socks4", "server": host, "server_port": proxy.Port}
+		if proxy.Username != "" {
+			raw["username"] = strings.TrimSpace(proxy.Username)
+		}
+		return domain.NodeMetadata{ID: buildNodeID("socks4", host, proxy.Port, proxy.Username), Name: name, Protocol: "socks4", Address: host, Port: proxy.Port, RawConfig: raw}, nil
+	case "http":
+		raw := map[string]any{"type": "http", "server": host, "server_port": proxy.Port}
+		if proxy.Username != "" {
+			raw["username"] = strings.TrimSpace(proxy.Username)
+		}
+		if proxy.Password != "" {
+			raw["password"] = strings.TrimSpace(proxy.Password)
+		}
+		return domain.NodeMetadata{ID: buildNodeID("http", host, proxy.Port, proxy.Username+":"+proxy.Password), Name: name, Protocol: "http", Address: host, Port: proxy.Port, RawConfig: raw}, nil
 	case "trojan":
 		raw := map[string]any{"type": "trojan", "server": host, "server_port": proxy.Port, "password": strings.TrimSpace(proxy.Password)}
 		if proxy.TLS {

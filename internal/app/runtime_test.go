@@ -336,6 +336,79 @@ func TestRefreshOnceShouldKeepPreviousSnapshotWhenCoreRebuildFails(t *testing.T)
 	}
 }
 
+func TestRefreshOnceShouldSupportRemoteTextFallbackWithSocks4AndHTTP(t *testing.T) {
+	t.Parallel()
+	cfg := config.Config{
+		Policy:  config.PolicyConfig{Strategy: config.StrategyRandom},
+		Sources: []config.Source{{Name: "s1", Type: config.SourceTypeSource, URL: "https://example.com/sub"}},
+	}
+	fetcher := fakeContentFetcher{results: map[string]source.FetchResult{
+		"https://example.com/sub": {
+			Content: []byte("1.1.1.1:1080#n1\nsocks4://legacy@2.2.2.2:1080#n2\nhttp://user:pass@3.3.3.3:8080#n3\n"),
+			Entries: []string{"socks5://1.1.1.1:1080#n1", "socks4://legacy@2.2.2.2:1080#n2", "http://user:pass@3.3.3.3:8080#n3"},
+		},
+	}}
+	core := &fakeRuntimeCore{}
+	rt := NewRuntime(context.Background(), cfg, "", parser.NewDispatcher(fetcher), "v1")
+	rt.core = core
+
+	result, err := rt.RefreshOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshOnce 返回错误: %v", err)
+	}
+	if !result.RebuildTriggered || core.startCalls != 1 {
+		t.Fatalf("应触发首次构建: result=%+v core=%+v", result, core)
+	}
+	snapshot := rt.Snapshot()
+	if snapshot.CandidateCount != 3 || snapshot.Sources[0].NodeCount != 3 {
+		t.Fatalf("快照计数错误: %+v", snapshot)
+	}
+	gotProtocols := []string{snapshot.Candidates[0].Protocol, snapshot.Candidates[1].Protocol, snapshot.Candidates[2].Protocol}
+	wantProtocols := []string{"socks5", "socks4", "http"}
+	for i := range wantProtocols {
+		if gotProtocols[i] != wantProtocols[i] {
+			t.Fatalf("协议顺序错误: got=%v want=%v", gotProtocols, wantProtocols)
+		}
+	}
+}
+
+func TestRefreshOnceShouldAggregateSourceNamesAcrossMixedProtocols(t *testing.T) {
+	t.Parallel()
+	cfg := config.Config{
+		Policy: config.PolicyConfig{Strategy: config.StrategyRandom},
+		Sources: []config.Source{
+			{Name: "remote-a", Type: config.SourceTypeSource, URL: "https://example.com/a"},
+			{Name: "remote-b", Type: config.SourceTypeSource, URL: "https://example.com/b"},
+		},
+	}
+	fetcher := fakeContentFetcher{results: map[string]source.FetchResult{
+		"https://example.com/a": {Entries: []string{"socks4://legacy@2.2.2.2:1080#n2", "http://user:pass@3.3.3.3:8080#n3"}},
+		"https://example.com/b": {Entries: []string{"socks4://legacy@2.2.2.2:1080#n2", "socks5://4.4.4.4:1080#n4"}},
+	}}
+	core := &fakeRuntimeCore{}
+	rt := NewRuntime(context.Background(), cfg, "", parser.NewDispatcher(fetcher), "v1")
+	rt.core = core
+
+	_, err := rt.RefreshOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RefreshOnce 返回错误: %v", err)
+	}
+	snapshot := rt.Snapshot()
+	if snapshot.RawNodeCount != 4 || snapshot.DedupedNodeCount != 3 {
+		t.Fatalf("去重计数错误: %+v", snapshot)
+	}
+	var merged domain.NodeMetadata
+	for _, node := range snapshot.Candidates {
+		if node.Protocol == "socks4" {
+			merged = node
+			break
+		}
+	}
+	if len(merged.SourceNames) != 2 {
+		t.Fatalf("SourceNames 聚合错误: %+v", merged)
+	}
+}
+
 func TestRefresherStartWithNilRuntimeShouldNoop(t *testing.T) {
 	t.Parallel()
 	NewRefresher(0, nil).Start(context.Background())

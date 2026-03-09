@@ -1,36 +1,75 @@
+# GeoLoom 生产环境参考配置
+#
+# 说明：
+# - 保持与 configs/config.example.yaml 相同的字段结构。
+# - 本示例更偏向生产环境：默认启用健康检查、启用 API、启用状态持久化。
+# - `sources` 支持三种 type：`source` / `subscribe` / `node`。
+# - 顶层 `http://` / `https://` 在 `type: source|subscribe` 下表示远程订阅 URL。
+
 gateway:
+  # 当前版本统一使用 socks_port 作为代理入口；http_port 需保留且不能与 socks_port 相同。
   http_port: 8080
   socks_port: 1080
 
 policy:
+  # 生产环境更推荐 `urltest`，便于结合健康探测选择候选节点。
   strategy: urltest
+
   filter:
+    # 可按部署需求填写国家白名单/黑名单，例如 [HK, SG, JP]。
     allow: []
     block: []
+
   health_check:
     enabled: true
     interval: 5m
     url: http://cp.cloudflare.com
+
   refresh:
     enabled: true
     interval: 10m
 
 geo:
+  # 生产环境建议预置本地 MMDB；若为空则走默认查找/下载逻辑。
   mmdb_path: ""
+
+  # 若不希望启动时自动下载，可保持为空并自行挂载 MMDB 文件。
   mmdb_url: ""
   dns_timeout: 3s
 
 api:
   enabled: true
+
+  # 建议仅监听回环地址，再通过反向代理或隧道做受控访问。
   listen: 127.0.0.1:9090
+
+  # 生产环境建议配置非空 token。
   token: "CHANGE-ME"
   auth_header: X-GeoLoom-Token
 
 state:
   enabled: true
+
+  # 建议挂载到持久卷，避免进程重启丢失惩罚窗口与健康状态。
   path: geoloom-state.json
 
 sources:
+  # 推荐主用远程订阅 source。
   - name: remote-subscription
     type: source
     url: "https://example.com/subscribe?token=YOUR_TOKEN"
+
+  # 可选：本地文件 source，适合挂载额外补充节点列表。
+  - name: local-fallback-file
+    type: source
+    url: "@/etc/geoloom/providers/fallback.txt"
+
+  # 可选：兼容历史写法的 subscribe 别名。
+  - name: subscribe-alias
+    type: subscribe
+    url: "https://example.com/another-subscription"
+
+  # 可选：手工补充单节点。
+  - name: manual-backup-node
+    type: node
+    url: "socks5://user:pass@203.0.113.10:1080#manual-backup"

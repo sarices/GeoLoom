@@ -135,7 +135,11 @@ func (d *Dispatcher) parseSourceContent(rawInput string, fetchResult source.Fetc
 	unsupported := make([]string, 0)
 	for _, entry := range entries {
 		entryType, entryScheme, detectErr := DetectInputType(entry)
-		if detectErr != nil || entryType != InputTypeNode {
+		if detectErr != nil {
+			unsupported = append(unsupported, entry)
+			continue
+		}
+		if entryType != InputTypeNode && entryScheme != "http" {
 			unsupported = append(unsupported, entry)
 			continue
 		}
@@ -194,7 +198,7 @@ func DetectInputType(rawInput string) (InputType, string, error) {
 	switch scheme {
 	case "http", "https":
 		return InputTypeSource, scheme, nil
-	case "hysteria2", "hy2", "socks5", "vless", "trojan", "vmess", "ss":
+	case "hysteria2", "hy2", "socks5", "socks4", "vless", "trojan", "vmess", "ss":
 		return InputTypeNode, scheme, nil
 	default:
 		return "", scheme, newParseError(ErrorKindUnsupportedScheme, rawInput, "不支持的 scheme", nil)
@@ -207,6 +211,10 @@ func (d *Dispatcher) parseNodeByScheme(scheme, rawInput string) (domain.NodeMeta
 		return ParseHysteria2(rawInput)
 	case "socks5":
 		return ParseSocks5(rawInput)
+	case "socks4":
+		return ParseSocks4(rawInput)
+	case "http":
+		return ParseHTTPProxy(rawInput)
 	case "vless":
 		return ParseVLESS(rawInput)
 	case "trojan":

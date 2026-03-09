@@ -20,6 +20,7 @@ import (
 	"github.com/sagernet/sing-box/option"
 	protocolDirect "github.com/sagernet/sing-box/protocol/direct"
 	protocolGroup "github.com/sagernet/sing-box/protocol/group"
+	protocolHTTP "github.com/sagernet/sing-box/protocol/http"
 	protocolHysteria2 "github.com/sagernet/sing-box/protocol/hysteria2"
 	protocolShadowsocks "github.com/sagernet/sing-box/protocol/shadowsocks"
 	protocolSocks "github.com/sagernet/sing-box/protocol/socks"
@@ -169,6 +170,7 @@ func ensureRegistryContext(ctx context.Context) context.Context {
 	protocolGroup.RegisterSelector(outboundRegistry)
 	protocolGroup.RegisterURLTest(outboundRegistry)
 	registerGeoloomRandom(outboundRegistry)
+	protocolHTTP.RegisterOutbound(outboundRegistry)
 	protocolVless.RegisterOutbound(outboundRegistry)
 	protocolHysteria2.RegisterOutbound(outboundRegistry)
 	protocolShadowsocks.RegisterOutbound(outboundRegistry)

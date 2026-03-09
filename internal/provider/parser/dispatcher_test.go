@@ -35,6 +35,7 @@ func TestDetectInputType(t *testing.T) {
 		{name: "source-https-with-token", input: "https://sub.example.com/api/v1/client/subscribe?token=abc123", wantType: InputTypeSource, wantScheme: "https"},
 		{name: "node-hy2", input: "hysteria2://pwd@1.1.1.1:443", wantType: InputTypeNode, wantScheme: "hysteria2"},
 		{name: "node-socks5", input: "socks5://u:p@1.1.1.1:1080", wantType: InputTypeNode, wantScheme: "socks5"},
+		{name: "node-socks4", input: "socks4://legacy@1.1.1.1:1080", wantType: InputTypeNode, wantScheme: "socks4"},
 		{name: "node-trojan", input: "trojan://pwd@1.1.1.1:443", wantType: InputTypeNode, wantScheme: "trojan"},
 		{name: "node-vmess", input: "vmess://eyJhZGQiOiIxLjEuMS4xIiwicG9ydCI6IjQ0MyIsImlkIjoiMTExMTExMTEtMTExMS0xMTExLTExMTEtMTExMTExMTExMTExIiwiYWlkIjoiMCJ9", wantType: InputTypeNode, wantScheme: "vmess"},
 		{name: "node-ss", input: "ss://YWVzLTEyOC1nY206cGFzc0AxLjEuMS4xOjgzODg=", wantType: InputTypeNode, wantScheme: "ss"},
@@ -95,6 +96,8 @@ func TestDispatcherParseSource(t *testing.T) {
 	fetcher := fakeFetcher{entries: []string{
 		"hysteria2://secret@156.246.91.11:2000?security=tls&sni=www.bing.com#hy2-jp",
 		"socks5://guest:pass12345@149.130.191.255:6161",
+		"socks4://legacy@149.130.191.254:1080#legacy",
+		"http://guest:pass12345@149.130.191.253:8080#http-proxy",
 		"vless://11111111-1111-1111-1111-111111111111@example.com:443?encryption=none#vless-test",
 		"trojan://secret@trojan.example.com:443?security=tls&sni=trojan.example.com#trojan-test",
 		vmessLink,
@@ -111,8 +114,8 @@ func TestDispatcherParseSource(t *testing.T) {
 	if result.Type != InputTypeSource {
 		t.Fatalf("输入类型错误: got=%s", result.Type)
 	}
-	if len(result.Nodes) != 6 {
-		t.Fatalf("节点数量错误: got=%d want=6", len(result.Nodes))
+	if len(result.Nodes) != 8 {
+		t.Fatalf("节点数量错误: got=%d want=8", len(result.Nodes))
 	}
 	if len(result.Unsupported) != 1 {
 		t.Fatalf("不支持条目数量错误: got=%d want=1", len(result.Unsupported))
@@ -125,10 +128,75 @@ func TestDispatcherParseSource(t *testing.T) {
 		result.Nodes[3].Protocol,
 		result.Nodes[4].Protocol,
 		result.Nodes[5].Protocol,
+		result.Nodes[6].Protocol,
+		result.Nodes[7].Protocol,
 	}
-	wantProtocols := []string{"hysteria2", "socks5", "vless", "trojan", "vmess", "shadowsocks"}
+	wantProtocols := []string{"hysteria2", "socks5", "socks4", "http", "vless", "trojan", "vmess", "shadowsocks"}
 	if !reflect.DeepEqual(gotProtocols, wantProtocols) {
 		t.Fatalf("协议序列不匹配: got=%v want=%v", gotProtocols, wantProtocols)
+	}
+}
+
+func TestDispatcherParseSourceDirtyEntries(t *testing.T) {
+	t.Parallel()
+
+	fetcher := fakeFetcher{entries: []string{
+		"SOCKS5://9.9.9.9:1080#upper-socks",
+		"http://1.1.1.1:8080#dup-a",
+		"http://1.1.1.1:8080#dup-b",
+		"ftp://unsupported.example:21#ftp",
+		"socks4://legacy@2.2.2.2:99999#bad-port",
+		"http://user%zz@3.3.3.3:8080#bad-uri",
+		"socks5://user:pass@4.4.4.4:1080#bare-auth",
+		"HTTPS://should-stay-unsupported.example.com/path",
+	}}
+	d := NewDispatcher(fetcher)
+
+	result, err := d.Parse(context.Background(), "https://example.com/sub")
+	if err != nil {
+		t.Fatalf("Parse 返回错误: %v", err)
+	}
+
+	if result.Type != InputTypeSource {
+		t.Fatalf("输入类型错误: got=%s", result.Type)
+	}
+	if len(result.Nodes) != 4 {
+		t.Fatalf("节点数量错误: got=%d want=4", len(result.Nodes))
+	}
+	if len(result.Unsupported) != 4 {
+		t.Fatalf("不支持条目数量错误: got=%d want=4 unsupported=%v", len(result.Unsupported), result.Unsupported)
+	}
+
+	gotProtocols := []string{
+		result.Nodes[0].Protocol,
+		result.Nodes[1].Protocol,
+		result.Nodes[2].Protocol,
+		result.Nodes[3].Protocol,
+	}
+	wantProtocols := []string{"socks5", "http", "http", "socks5"}
+	if !reflect.DeepEqual(gotProtocols, wantProtocols) {
+		t.Fatalf("协议序列不匹配: got=%v want=%v", gotProtocols, wantProtocols)
+	}
+
+	gotNames := []string{
+		result.Nodes[0].Name,
+		result.Nodes[1].Name,
+		result.Nodes[2].Name,
+		result.Nodes[3].Name,
+	}
+	wantNames := []string{"upper-socks", "dup-a", "dup-b", "bare-auth"}
+	if !reflect.DeepEqual(gotNames, wantNames) {
+		t.Fatalf("节点名称序列不匹配: got=%v want=%v", gotNames, wantNames)
+	}
+
+	wantUnsupported := []string{
+		"ftp://unsupported.example:21#ftp",
+		"socks4://legacy@2.2.2.2:99999#bad-port",
+		"http://user%zz@3.3.3.3:8080#bad-uri",
+		"HTTPS://should-stay-unsupported.example.com/path",
+	}
+	if !reflect.DeepEqual(result.Unsupported, wantUnsupported) {
+		t.Fatalf("unsupported 不匹配: got=%v want=%v", result.Unsupported, wantUnsupported)
 	}
 }
 
