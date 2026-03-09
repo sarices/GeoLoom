@@ -25,6 +25,7 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 - MaxMind MMDB 国家识别
 - IP -> 国家缓存
 - allow/block 过滤（`block` 优先）
+- 节点稳定 fingerprint 与跨 source 去重（geo 前执行，避免重复节点放大候选池）
 
 ### Core / LoadBalance / Health
 - 最小可用拓扑：SOCKS 入站 + 统一 `lb-out` 出口
@@ -72,7 +73,7 @@ go run ./cmd/geoloom -version
 
 ### 5) Docker Compose 部署（GHCR 镜像）
 
-> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.1`。
+> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.2`。
 
 1. 准备配置文件（示例）：
 
@@ -114,7 +115,7 @@ GeoLoom version=dev commit=unknown build_time=unknown
 生产构建建议通过 `-ldflags` 注入版本信息：
 
 ```bash
-go build -ldflags "-X main.Version=v0.1.0 -X main.Commit=$(git rev-parse --short HEAD) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/geoloom
+go build -ldflags "-X main.Version=v0.2.2 -X main.Commit=$(git rev-parse --short HEAD) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/geoloom
 ```
 
 ## 多环境打包（build-all）
@@ -122,18 +123,18 @@ go build -ldflags "-X main.Version=v0.1.0 -X main.Commit=$(git rev-parse --short
 ### 一键打包
 
 ```bash
-bash scripts/release/build-all.sh v0.1.0
+bash scripts/release/build-all.sh v0.2.2
 ```
 
 可选参数（按顺序覆盖）：
-- `VERSION`：版本号（默认 `v0.1.0`）
+- `VERSION`：版本号（默认 `v0.2.2`）
 - `COMMIT`：提交短哈希（默认自动读取，失败回退 `unknown`）
 - `BUILD_TIME`：UTC 时间（默认当前时间，ISO8601）
 
 例如：
 
 ```bash
-bash scripts/release/build-all.sh v0.1.0 abc1234 2026-03-05T09:00:00Z
+bash scripts/release/build-all.sh v0.2.2 abc1234 2026-03-05T09:00:00Z
 ```
 
 ### 输出结构
@@ -218,6 +219,7 @@ go run ./cmd/geoloom -config configs/config.yaml
 启动成功后，建议重点观察以下日志关键字：
 - `GeoLoom 启动完成`
 - `输入源处理成功`
+- `节点去重完成`（关注 `raw_nodes/deduped_nodes/duplicate_nodes`）
 - `节点过滤完成`
 - `core wrapper 启动成功`
 

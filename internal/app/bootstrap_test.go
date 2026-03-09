@@ -1,8 +1,10 @@
 package app
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 	"os"
 	"path/filepath"
@@ -13,6 +15,8 @@ import (
 	"geoloom/internal/config"
 	"geoloom/internal/domain"
 	"geoloom/internal/health"
+	"geoloom/internal/provider/parser"
+	"geoloom/internal/provider/source"
 )
 
 func TestApplyGeoWithoutMMDB(t *testing.T) {
@@ -210,6 +214,74 @@ sources:
 	}
 	if !strings.Contains(err.Error(), "sources[0].type") {
 		t.Fatalf("错误信息缺少字段路径: %v", err)
+	}
+}
+
+func TestCollectNodesDedupAcrossSources(t *testing.T) {
+	t.Parallel()
+
+	tmpDir := t.TempDir()
+	sourceFilePath := filepath.Join(tmpDir, "duplicate-nodes.txt")
+	sourceText := "1.1.1.1:1080#from-file\n"
+	if err := os.WriteFile(sourceFilePath, []byte(sourceText), 0o600); err != nil {
+		t.Fatalf("写入 source 文件失败: %v", err)
+	}
+
+	cfg := config.Config{
+		Sources: []config.Source{
+			{Name: "direct-node", Type: config.SourceTypeNode, URL: "socks5://1.1.1.1:1080#from-direct"},
+			{Name: "file-source", Type: config.SourceTypeSource, URL: sourceFilePath},
+		},
+	}
+
+	nodes, err := collectNodes(context.Background(), cfg, filepath.Join(tmpDir, "config.yaml"), parser.NewDispatcher(source.NewSubscriptionFetcher(nil)))
+	if err != nil {
+		t.Fatalf("collectNodes 返回错误: %v", err)
+	}
+	if len(nodes) != 1 {
+		t.Fatalf("跨 source 重复节点应只保留 1 条: got=%d", len(nodes))
+	}
+	if nodes[0].Fingerprint == "" {
+		t.Fatal("collectNodes 应回填 Fingerprint")
+	}
+	if got, want := strings.Join(nodes[0].SourceNames, ","), "direct-node,file-source"; got != want {
+		t.Fatalf("SourceNames 合并错误: got=%s want=%s", got, want)
+	}
+}
+
+func TestCollectNodesDedupAcrossSourcesLogsStats(t *testing.T) {
+	tmpDir := t.TempDir()
+	sourceFilePath := filepath.Join(tmpDir, "duplicate-nodes.txt")
+	sourceText := "1.1.1.1:1080#from-file\n"
+	if err := os.WriteFile(sourceFilePath, []byte(sourceText), 0o600); err != nil {
+		t.Fatalf("写入 source 文件失败: %v", err)
+	}
+
+	cfg := config.Config{
+		Sources: []config.Source{
+			{Name: "direct-node", Type: config.SourceTypeNode, URL: "socks5://1.1.1.1:1080#from-direct"},
+			{Name: "file-source", Type: config.SourceTypeSource, URL: sourceFilePath},
+		},
+	}
+
+	var buf bytes.Buffer
+	oldLogger := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&buf, &slog.HandlerOptions{})))
+	defer slog.SetDefault(oldLogger)
+
+	_, err := collectNodes(context.Background(), cfg, filepath.Join(tmpDir, "config.yaml"), parser.NewDispatcher(source.NewSubscriptionFetcher(nil)))
+	if err != nil {
+		t.Fatalf("collectNodes 返回错误: %v", err)
+	}
+
+	logs := buf.String()
+	if !strings.Contains(logs, "节点去重完成") {
+		t.Fatalf("日志缺少去重完成事件: %s", logs)
+	}
+	for _, want := range []string{"raw_nodes=2", "deduped_nodes=1", "duplicate_nodes=1"} {
+		if !strings.Contains(logs, want) {
+			t.Fatalf("日志缺少字段 %s: %s", want, logs)
+		}
 	}
 }
 

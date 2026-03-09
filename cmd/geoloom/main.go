@@ -20,7 +20,7 @@ var (
 	fileStat       = os.Stat
 
 	// 通过 -ldflags 注入版本信息，默认值用于本地开发构建。
-	Version   = "v0.1.0"
+	Version   = "v0.2.2"
 	Commit    = "unknown"
 	BuildTime = "unknown"
 )

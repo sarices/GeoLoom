@@ -48,27 +48,9 @@ func Run(ctx context.Context, configPath string) error {
 	)
 
 	dispatcher := parser.NewDispatcher(source.NewSubscriptionFetcher(nil))
-	allNodes := make([]domain.NodeMetadata, 0)
-	for _, src := range cfg.Sources {
-		normalizedURL := normalizeSourceURL(src, configPath)
-		result, parseErr := dispatcher.Parse(ctx, normalizedURL)
-		if parseErr != nil {
-			slog.Warn("输入源处理失败",
-				"source", src.Name,
-				"url", src.URL,
-				"normalized_url", normalizedURL,
-				"error", parseErr,
-			)
-			continue
-		}
-
-		slog.Info("输入源处理成功",
-			"source", src.Name,
-			"input_type", result.Type,
-			"node_count", len(result.Nodes),
-			"unsupported_count", len(result.Unsupported),
-		)
-		allNodes = append(allNodes, result.Nodes...)
+	allNodes, err := collectNodes(ctx, cfg, configPath, dispatcher)
+	if err != nil {
+		return err
 	}
 
 	resolvedNodes, geoFailed := applyGeo(ctx, cfg, allNodes, configPath)
@@ -130,6 +112,59 @@ func Run(ctx context.Context, configPath string) error {
 	<-ctx.Done()
 	slog.Info("GeoLoom 收到退出信号", "reason", ctx.Err())
 	return nil
+}
+
+func collectNodes(ctx context.Context, cfg config.Config, configPath string, dispatcher *parser.Dispatcher) ([]domain.NodeMetadata, error) {
+	allNodes := make([]domain.NodeMetadata, 0)
+	for _, src := range cfg.Sources {
+		normalizedURL := normalizeSourceURL(src, configPath)
+		result, parseErr := dispatcher.Parse(ctx, normalizedURL)
+		if parseErr != nil {
+			slog.Warn("输入源处理失败",
+				"source", src.Name,
+				"url", src.URL,
+				"normalized_url", normalizedURL,
+				"error", parseErr,
+			)
+			continue
+		}
+
+		sourceName := buildSourceName(src, normalizedURL)
+		for i := range result.Nodes {
+			if sourceName != "" {
+				result.Nodes[i].SourceNames = []string{sourceName}
+			}
+		}
+
+		slog.Info("输入源处理成功",
+			"source", src.Name,
+			"input_type", result.Type,
+			"node_count", len(result.Nodes),
+			"unsupported_count", len(result.Unsupported),
+		)
+		allNodes = append(allNodes, result.Nodes...)
+	}
+
+	rawCount := len(allNodes)
+	deduped, err := domain.DedupNodes(allNodes)
+	if err != nil {
+		return nil, fmt.Errorf("节点去重失败: %w", err)
+	}
+	allNodes = deduped.Nodes
+
+	slog.Info("节点去重完成",
+		"raw_nodes", rawCount,
+		"deduped_nodes", len(allNodes),
+		"duplicate_nodes", deduped.DuplicateCount,
+	)
+	return allNodes, nil
+}
+
+func buildSourceName(src config.Source, normalizedURL string) string {
+	if name := strings.TrimSpace(src.Name); name != "" {
+		return name
+	}
+	return strings.TrimSpace(strings.TrimPrefix(normalizedURL, "@"))
 }
 
 func normalizeSourceURL(src config.Source, configPath string) string {
