@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"geoloom/internal/domain"
+	"geoloom/internal/provider/source"
 )
 
 // InputType 表示输入归类结果。
@@ -31,13 +32,23 @@ type SubscriptionFetcher interface {
 	Fetch(ctx context.Context, sourceURL string) ([]string, error)
 }
 
+// SubscriptionContentFetcher 抽象返回原始内容的订阅拉取能力。
+type SubscriptionContentFetcher interface {
+	FetchResult(ctx context.Context, sourceURL string) (source.FetchResult, error)
+}
+
 // Dispatcher 根据 scheme 分发 source/node 解析流程。
 type Dispatcher struct {
-	fetcher SubscriptionFetcher
+	fetcher        SubscriptionFetcher
+	contentFetcher SubscriptionContentFetcher
 }
 
 func NewDispatcher(fetcher SubscriptionFetcher) *Dispatcher {
-	return &Dispatcher{fetcher: fetcher}
+	d := &Dispatcher{fetcher: fetcher}
+	if typed, ok := fetcher.(SubscriptionContentFetcher); ok {
+		d.contentFetcher = typed
+	}
+	return d
 }
 
 // Parse 对单条输入做分发并解析。
@@ -71,38 +82,92 @@ func (d *Dispatcher) Parse(ctx context.Context, rawInput string) (DispatchResult
 			return result, newParseError(ErrorKindSourceFetcherMissing, cleaned, "未配置订阅抓取器", nil)
 		}
 
-		entries, fetchErr := d.fetcher.Fetch(ctx, cleaned)
+		fetchResult, fetchErr := d.fetchSourceResult(ctx, cleaned)
 		if fetchErr != nil {
 			return result, newParseError(ErrorKindSourceFetchFailed, cleaned, "订阅拉取失败", fetchErr)
 		}
-		result.RawEntries = entries
-		if len(entries) == 0 {
-			return result, newParseError(ErrorKindSourceContentEmpty, cleaned, "订阅内容为空", nil)
+		result.RawEntries = fetchResult.Entries
+
+		nodes, unsupported, parseErr := d.parseSourceContent(cleaned, fetchResult)
+		result.Nodes = nodes
+		result.Unsupported = unsupported
+		if parseErr != nil {
+			return result, parseErr
 		}
-
-		for _, entry := range entries {
-			entryType, entryScheme, detectErr := DetectInputType(entry)
-			if detectErr != nil || entryType != InputTypeNode {
-				result.Unsupported = append(result.Unsupported, entry)
-				continue
-			}
-
-			node, nodeErr := d.parseNodeByScheme(entryScheme, entry)
-			if nodeErr != nil {
-				result.Unsupported = append(result.Unsupported, entry)
-				continue
-			}
-			result.Nodes = append(result.Nodes, node)
-		}
-
-		if len(result.Nodes) == 0 {
-			return result, newParseError(ErrorKindSourceNoSupportedNode, cleaned, "订阅中没有可用节点", nil)
-		}
-
 		return result, nil
 	default:
 		return DispatchResult{}, newParseError(ErrorKindUnsupportedScheme, cleaned, fmt.Sprintf("未知输入类型: %s", inputType), nil)
 	}
+}
+
+func (d *Dispatcher) fetchSourceResult(ctx context.Context, sourceURL string) (source.FetchResult, error) {
+	if d.contentFetcher != nil {
+		return d.contentFetcher.FetchResult(ctx, sourceURL)
+	}
+	entries, err := d.fetcher.Fetch(ctx, sourceURL)
+	if err != nil {
+		return source.FetchResult{}, err
+	}
+	return source.FetchResult{Entries: entries}, nil
+}
+
+func (d *Dispatcher) parseSourceContent(rawInput string, fetchResult source.FetchResult) ([]domain.NodeMetadata, []string, error) {
+	content := strings.TrimSpace(string(fetchResult.Content))
+	if content != "" {
+		nodes, unsupported, handled, err := d.parseStructuredSourceContent(rawInput, fetchResult.Content)
+		if err != nil {
+			return nodes, unsupported, err
+		}
+		if handled {
+			if len(nodes) == 0 {
+				return nodes, unsupported, newParseError(ErrorKindSourceNoSupportedNode, rawInput, "订阅中没有可用节点", nil)
+			}
+			return nodes, unsupported, nil
+		}
+	}
+
+	entries := fetchResult.Entries
+	if len(entries) == 0 {
+		return nil, nil, newParseError(ErrorKindSourceContentEmpty, rawInput, "订阅内容为空", nil)
+	}
+
+	resultNodes := make([]domain.NodeMetadata, 0, len(entries))
+	unsupported := make([]string, 0)
+	for _, entry := range entries {
+		entryType, entryScheme, detectErr := DetectInputType(entry)
+		if detectErr != nil || entryType != InputTypeNode {
+			unsupported = append(unsupported, entry)
+			continue
+		}
+
+		node, nodeErr := d.parseNodeByScheme(entryScheme, entry)
+		if nodeErr != nil {
+			unsupported = append(unsupported, entry)
+			continue
+		}
+		resultNodes = append(resultNodes, node)
+	}
+
+	if len(resultNodes) == 0 {
+		return resultNodes, unsupported, newParseError(ErrorKindSourceNoSupportedNode, rawInput, "订阅中没有可用节点", nil)
+	}
+	return resultNodes, unsupported, nil
+}
+
+func (d *Dispatcher) parseStructuredSourceContent(rawInput string, content []byte) ([]domain.NodeMetadata, []string, bool, error) {
+	if nodes, ok, err := ParseClashYAML(content); ok {
+		if err != nil {
+			return nil, nil, true, newParseError(ErrorKindInvalidInput, rawInput, "Clash YAML 解析失败", err)
+		}
+		return nodes, nil, true, nil
+	}
+	if nodes, ok, err := ParseSingboxJSON(content); ok {
+		if err != nil {
+			return nil, nil, true, newParseError(ErrorKindInvalidInput, rawInput, "Sing-box JSON 解析失败", err)
+		}
+		return nodes, nil, true, nil
+	}
+	return nil, nil, false, nil
 }
 
 // DetectInputType 识别输入是订阅 source 还是节点链接。

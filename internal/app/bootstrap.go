@@ -12,12 +12,10 @@ import (
 	"strings"
 	"time"
 
+	"geoloom/internal/api"
 	"geoloom/internal/config"
-	"geoloom/internal/core/singbox"
 	"geoloom/internal/domain"
-	"geoloom/internal/filter"
 	"geoloom/internal/geo"
-	"geoloom/internal/health"
 	netresolver "geoloom/internal/net"
 	"geoloom/internal/provider/parser"
 	"geoloom/internal/provider/source"
@@ -47,64 +45,46 @@ func Run(ctx context.Context, configPath string) error {
 		"strategy", cfg.Policy.Strategy,
 	)
 
-	dispatcher := parser.NewDispatcher(source.NewSubscriptionFetcher(nil))
-	allNodes, err := collectNodes(ctx, cfg, configPath, dispatcher)
-	if err != nil {
+	runtime := NewRuntime(ctx, cfg, configPath, parser.NewDispatcher(source.NewSubscriptionFetcher(nil)), "")
+	if err := runtime.Start(ctx); err != nil {
 		return err
 	}
-
-	resolvedNodes, geoFailed := applyGeo(ctx, cfg, allNodes, configPath)
-	filterEngine := filter.NewEngine(filter.Config{
-		Allow: cfg.Policy.Filter.Allow,
-		Block: cfg.Policy.Filter.Block,
-	})
-	filtered := filterEngine.Filter(resolvedNodes)
-
-	slog.Info("节点过滤完成",
-		"input_nodes", len(allNodes),
-		"geo_resolved_nodes", len(resolvedNodes),
-		"geo_failed_nodes", geoFailed,
-		"candidate_nodes", len(filtered.Candidates),
-		"dropped_nodes", len(filtered.Dropped),
-	)
-
-	if len(filtered.Candidates) == 0 {
-		return fmt.Errorf("过滤后无可用候选节点")
-	}
-
-	coreService := singbox.NewService(ctx, singbox.NewOptionsBuilder())
-	if err := coreService.Start(cfg, filtered.Candidates); err != nil {
-		return fmt.Errorf("启动 core wrapper 失败: %w", err)
-	}
 	defer func() {
-		if closeErr := coreService.Close(); closeErr != nil {
-			slog.Warn("关闭 core wrapper 失败", "error", closeErr)
+		if closeErr := runtime.Close(); closeErr != nil {
+			slog.Warn("关闭运行时失败", "error", closeErr)
 		}
 	}()
 
-	if cfg.Policy.HealthCheck.Enabled {
-		interval, err := time.ParseDuration(cfg.Policy.HealthCheck.Interval)
+	if cfg.Policy.Refresh.Enabled {
+		interval, err := time.ParseDuration(cfg.Policy.Refresh.Interval)
 		if err != nil || interval <= 0 {
-			interval = 30 * time.Second
+			interval = 10 * time.Minute
 		}
-		penaltyPool := health.NewPenaltyPool(5 * time.Minute)
-		checker := health.NewChecker(interval, cfg.Policy.HealthCheck.URL, penaltyPool, func(rebuildCtx context.Context, candidates []domain.NodeMetadata) error {
-			if err := coreService.Rebuild(cfg, candidates); err != nil {
-				slog.Warn("健康检查触发重建失败", "error", err, "candidate_nodes", len(candidates))
-				return err
-			}
-			slog.Info("健康检查触发重建成功", "candidate_nodes", len(candidates))
-			return nil
-		})
-		checker.Start(ctx, filtered.Candidates)
+		NewRefresher(interval, runtime).Start(ctx)
 	}
 
-	coreStats := coreService.LastBuildStats()
+	if cfg.API.Enabled {
+		server := &http.Server{Addr: cfg.API.Listen, Handler: api.NewServer(runtime, cfg.API.AuthHeader, cfg.API.Token).Handler()}
+		go func() {
+			if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				slog.Warn("管理 API 启动失败", "error", err)
+			}
+		}()
+		defer func() {
+			shutdownCtx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer cancel()
+			if err := server.Shutdown(shutdownCtx); err != nil {
+				slog.Warn("关闭管理 API 失败", "error", err)
+			}
+		}()
+	}
+
+	coreStats := runtime.Snapshot().CoreStats
 	slog.Info("core wrapper 启动成功",
 		"inbound", "socks",
 		"socks_port", cfg.Gateway.SocksPort,
 		"strategy", cfg.Policy.Strategy,
-		"candidate_nodes", len(filtered.Candidates),
+		"candidate_nodes", len(runtime.Snapshot().Candidates),
 		"core_supported_candidates", coreStats.SupportedCandidates,
 		"core_unsupported_count", len(coreStats.Unsupported),
 	)
@@ -115,49 +95,8 @@ func Run(ctx context.Context, configPath string) error {
 }
 
 func collectNodes(ctx context.Context, cfg config.Config, configPath string, dispatcher *parser.Dispatcher) ([]domain.NodeMetadata, error) {
-	allNodes := make([]domain.NodeMetadata, 0)
-	for _, src := range cfg.Sources {
-		normalizedURL := normalizeSourceURL(src, configPath)
-		result, parseErr := dispatcher.Parse(ctx, normalizedURL)
-		if parseErr != nil {
-			slog.Warn("输入源处理失败",
-				"source", src.Name,
-				"url", src.URL,
-				"normalized_url", normalizedURL,
-				"error", parseErr,
-			)
-			continue
-		}
-
-		sourceName := buildSourceName(src, normalizedURL)
-		for i := range result.Nodes {
-			if sourceName != "" {
-				result.Nodes[i].SourceNames = []string{sourceName}
-			}
-		}
-
-		slog.Info("输入源处理成功",
-			"source", src.Name,
-			"input_type", result.Type,
-			"node_count", len(result.Nodes),
-			"unsupported_count", len(result.Unsupported),
-		)
-		allNodes = append(allNodes, result.Nodes...)
-	}
-
-	rawCount := len(allNodes)
-	deduped, err := domain.DedupNodes(allNodes)
-	if err != nil {
-		return nil, fmt.Errorf("节点去重失败: %w", err)
-	}
-	allNodes = deduped.Nodes
-
-	slog.Info("节点去重完成",
-		"raw_nodes", rawCount,
-		"deduped_nodes", len(allNodes),
-		"duplicate_nodes", deduped.DuplicateCount,
-	)
-	return allNodes, nil
+	_, nodes, _, err := collectNodesDetailed(ctx, cfg, configPath, dispatcher)
+	return nodes, err
 }
 
 func buildSourceName(src config.Source, normalizedURL string) string {

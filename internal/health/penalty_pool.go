@@ -12,6 +12,11 @@ type CandidateStats struct {
 	AllPenalizedFallback bool
 }
 
+// PenaltyState 表示单节点惩罚状态。
+type PenaltyState struct {
+	PenaltyUntil time.Time `json:"penalty_until"`
+}
+
 // PenaltyPool 维护节点惩罚窗口状态。
 type PenaltyPool struct {
 	nowFunc   func() time.Time
@@ -40,35 +45,35 @@ func newPenaltyPoolWithNow(window time.Duration, nowFunc func() time.Time) *Pena
 }
 
 // MarkFailure 将节点标记为惩罚状态。
-func (p *PenaltyPool) MarkFailure(nodeID string) {
-	if nodeID == "" {
+func (p *PenaltyPool) MarkFailure(nodeKey string) {
+	if nodeKey == "" {
 		return
 	}
 	until := p.nowFunc().Add(p.window)
 	p.mu.Lock()
-	p.penalties[nodeID] = until
+	p.penalties[nodeKey] = until
 	p.mu.Unlock()
 }
 
 // MarkSuccess 解除节点惩罚状态。
-func (p *PenaltyPool) MarkSuccess(nodeID string) {
-	if nodeID == "" {
+func (p *PenaltyPool) MarkSuccess(nodeKey string) {
+	if nodeKey == "" {
 		return
 	}
 	p.mu.Lock()
-	delete(p.penalties, nodeID)
+	delete(p.penalties, nodeKey)
 	p.mu.Unlock()
 }
 
 // IsPenalized 判断节点是否在惩罚窗口内。
-func (p *PenaltyPool) IsPenalized(nodeID string) bool {
-	if nodeID == "" {
+func (p *PenaltyPool) IsPenalized(nodeKey string) bool {
+	if nodeKey == "" {
 		return false
 	}
 	now := p.nowFunc()
 
 	p.mu.RLock()
-	until, exists := p.penalties[nodeID]
+	until, exists := p.penalties[nodeKey]
 	p.mu.RUnlock()
 	if !exists {
 		return false
@@ -78,8 +83,8 @@ func (p *PenaltyPool) IsPenalized(nodeID string) bool {
 	}
 
 	p.mu.Lock()
-	if currentUntil, ok := p.penalties[nodeID]; ok && !now.Before(currentUntil) {
-		delete(p.penalties, nodeID)
+	if currentUntil, ok := p.penalties[nodeKey]; ok && !now.Before(currentUntil) {
+		delete(p.penalties, nodeKey)
 	}
 	p.mu.Unlock()
 	return false
@@ -131,4 +136,22 @@ func (p *PenaltyPool) Snapshot() map[string]time.Time {
 		result[key] = value
 	}
 	return result
+}
+
+// Restore 从持久化状态恢复惩罚快照，自动丢弃已过期项。
+func (p *PenaltyPool) Restore(snapshot map[string]time.Time) {
+	if p == nil {
+		return
+	}
+	now := p.nowFunc()
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	p.penalties = make(map[string]time.Time, len(snapshot))
+	for key, until := range snapshot {
+		if key == "" || !now.Before(until) {
+			continue
+		}
+		p.penalties[key] = until
+	}
 }

@@ -20,6 +20,10 @@ const (
 
 	defaultHealthCheckInterval = "5m"
 	defaultHealthCheckURL      = "http://cp.cloudflare.com"
+	defaultRefreshInterval     = "10m"
+	defaultAPIListen           = "127.0.0.1:9090"
+	defaultAPIAuthHeader       = "X-GeoLoom-Token"
+	defaultStatePath           = "geoloom-state.json"
 
 	minPort = 1
 	maxPort = 65535
@@ -30,6 +34,8 @@ type Config struct {
 	Gateway GatewayConfig `yaml:"gateway"`
 	Policy  PolicyConfig  `yaml:"policy"`
 	Geo     GeoConfig     `yaml:"geo"`
+	API     APIConfig     `yaml:"api"`
+	State   StateConfig   `yaml:"state"`
 	Sources []Source      `yaml:"sources"`
 }
 
@@ -44,6 +50,7 @@ type PolicyConfig struct {
 	Strategy    string            `yaml:"strategy"`
 	Filter      FilterConfig      `yaml:"filter"`
 	HealthCheck HealthCheckConfig `yaml:"health_check"`
+	Refresh     RefreshConfig     `yaml:"refresh"`
 }
 
 // FilterConfig 定义地域白名单与黑名单。
@@ -59,11 +66,31 @@ type HealthCheckConfig struct {
 	URL      string `yaml:"url"`
 }
 
+// RefreshConfig 定义订阅刷新参数。
+type RefreshConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Interval string `yaml:"interval"`
+}
+
 // GeoConfig 定义地理识别参数。
 type GeoConfig struct {
 	MMDBPath   string `yaml:"mmdb_path"`
 	MMDBURL    string `yaml:"mmdb_url"`
 	DNSTimeout string `yaml:"dns_timeout"`
+}
+
+// APIConfig 定义管理 API 参数。
+type APIConfig struct {
+	Enabled    bool   `yaml:"enabled"`
+	Listen     string `yaml:"listen"`
+	Token      string `yaml:"token"`
+	AuthHeader string `yaml:"auth_header"`
+}
+
+// StateConfig 定义运行时状态持久化参数。
+type StateConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Path    string `yaml:"path"`
 }
 
 // Source 定义输入源。
@@ -127,6 +154,17 @@ func (c *Config) validate() error {
 		}
 	}
 
+	if c.Policy.Refresh.Enabled {
+		c.Policy.Refresh = normalizeRefresh(c.Policy.Refresh)
+		interval, err := time.ParseDuration(c.Policy.Refresh.Interval)
+		if err != nil {
+			return fmt.Errorf("policy.refresh.interval 非法: %w", err)
+		}
+		if interval <= 0 {
+			return fmt.Errorf("policy.refresh.interval 必须大于 0")
+		}
+	}
+
 	c.Policy.Filter.Allow = normalizeCountryCodes(c.Policy.Filter.Allow)
 	c.Policy.Filter.Block = normalizeCountryCodes(c.Policy.Filter.Block)
 	c.Geo.MMDBPath = strings.TrimSpace(c.Geo.MMDBPath)
@@ -147,6 +185,23 @@ func (c *Config) validate() error {
 	}
 	if _, err := time.ParseDuration(c.Geo.DNSTimeout); err != nil {
 		return fmt.Errorf("geo.dns_timeout 非法: %w", err)
+	}
+
+	if c.API.Enabled {
+		c.API = normalizeAPI(c.API)
+		if strings.TrimSpace(c.API.Listen) == "" {
+			return fmt.Errorf("api.listen 不能为空")
+		}
+		if strings.TrimSpace(c.API.AuthHeader) == "" {
+			return fmt.Errorf("api.auth_header 不能为空")
+		}
+	}
+
+	if c.State.Enabled {
+		c.State = normalizeState(c.State)
+		if strings.TrimSpace(c.State.Path) == "" {
+			return fmt.Errorf("state.path 不能为空")
+		}
 	}
 
 	if len(c.Sources) == 0 {
@@ -185,6 +240,32 @@ func normalizeHealthCheck(cfg HealthCheckConfig) HealthCheckConfig {
 	}
 	if strings.TrimSpace(cfg.URL) == "" {
 		cfg.URL = defaultHealthCheckURL
+	}
+	return cfg
+}
+
+func normalizeRefresh(cfg RefreshConfig) RefreshConfig {
+	if strings.TrimSpace(cfg.Interval) == "" {
+		cfg.Interval = defaultRefreshInterval
+	}
+	return cfg
+}
+
+func normalizeAPI(cfg APIConfig) APIConfig {
+	if strings.TrimSpace(cfg.Listen) == "" {
+		cfg.Listen = defaultAPIListen
+	}
+	cfg.Token = strings.TrimSpace(cfg.Token)
+	cfg.AuthHeader = strings.TrimSpace(cfg.AuthHeader)
+	if cfg.AuthHeader == "" {
+		cfg.AuthHeader = defaultAPIAuthHeader
+	}
+	return cfg
+}
+
+func normalizeState(cfg StateConfig) StateConfig {
+	if strings.TrimSpace(cfg.Path) == "" {
+		cfg.Path = defaultStatePath
 	}
 	return cfg
 }

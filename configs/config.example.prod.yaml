@@ -1,38 +1,36 @@
 gateway:
-  # HTTP 代理入站端口（按实际环境调整）
   http_port: 8080
-  # SOCKS5 代理入站端口
   socks_port: 1080
 
 policy:
-  # 可选：random / urltest
   strategy: urltest
   filter:
-    # 示例：只保留这些国家节点
-    # allow: ["HK", "JP", "SG", "US"]
     allow: []
-    # 示例：屏蔽高风险或不期望国家（优先级高于 allow）
     block: []
   health_check:
     enabled: true
     interval: 5m
     url: http://cp.cloudflare.com
+  refresh:
+    enabled: true
+    interval: 10m
 
 geo:
-  # 生产环境建议固定到可维护路径，便于统一更新。
   mmdb_path: ""
-  # 当 mmdb_path 为空时，可通过 URL 自动下载。
-  # 建议使用你可控的内部镜像地址。
   mmdb_url: ""
   dns_timeout: 3s
 
+api:
+  enabled: true
+  listen: 127.0.0.1:9090
+  token: "CHANGE-ME"
+  auth_header: X-GeoLoom-Token
+
+state:
+  enabled: true
+  path: geoloom-state.json
+
 sources:
-  # 生产环境建议使用远程订阅，避免在仓库存放真实节点。
   - name: remote-subscription
     type: source
     url: "https://example.com/subscribe?token=YOUR_TOKEN"
-
-  # 可选：本地兜底节点文件
-  # - name: local-fallback
-  #   type: source
-  #   url: "sub.txt"

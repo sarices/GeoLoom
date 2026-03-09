@@ -1,0 +1,18 @@
+proxies:
+  - name: clash-vmess
+    type: vmess
+    server: vmess.example.com
+    port: 443
+    uuid: 11111111-1111-1111-1111-111111111111
+    alterId: 0
+    cipher: auto
+    tls: true
+    network: ws
+    host: ws.example.com
+    path: /ws
+  - name: clash-socks
+    type: socks5
+    server: 2.2.2.2
+    port: 1080
+    username: demo
+    password: pass

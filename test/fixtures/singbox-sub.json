@@ -1,0 +1,28 @@
+{
+  "outbounds": [
+    {
+      "type": "vless",
+      "tag": "sb-vless",
+      "server": "vless.example.com",
+      "server_port": 443,
+      "uuid": "11111111-1111-1111-1111-111111111111",
+      "tls": {
+        "enabled": true,
+        "server_name": "vless.example.com"
+      },
+      "transport": {
+        "type": "ws",
+        "host": "ws.example.com",
+        "path": "/vless"
+      }
+    },
+    {
+      "type": "socks",
+      "tag": "sb-socks",
+      "server": "3.3.3.3",
+      "server_port": 1080,
+      "username": "demo",
+      "password": "pass"
+    }
+  ]
+}

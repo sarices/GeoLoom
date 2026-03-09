@@ -64,7 +64,8 @@ func TestCheckerEvaluateAndRebuild(t *testing.T) {
 		t.Fatalf("初始惩罚数量应为 0: got=%d", stats.PenalizedNodes)
 	}
 
-	checker.evaluateAndRebuild(context.Background(), nodes)
+	checker.SetNodes(nodes)
+	checker.evaluateAndRebuild(context.Background())
 	if rebuildCalls != 1 {
 		t.Fatalf("重建次数错误: got=%d want=1", rebuildCalls)
 	}
@@ -73,7 +74,8 @@ func TestCheckerEvaluateAndRebuild(t *testing.T) {
 	}
 
 	now = now.Add(1 * time.Second)
-	checker.evaluateAndRebuild(context.Background(), nodes)
+	checker.SetNodes(nodes)
+	checker.evaluateAndRebuild(context.Background())
 	if rebuildCalls != 1 {
 		t.Fatalf("候选未变化时不应重复重建: got=%d", rebuildCalls)
 	}
@@ -82,7 +84,8 @@ func TestCheckerEvaluateAndRebuild(t *testing.T) {
 	doer.failing["bad.example.com"] = false
 	doer.mu.Unlock()
 	now = now.Add(6 * time.Minute)
-	checker.evaluateAndRebuild(context.Background(), nodes)
+	checker.SetNodes(nodes)
+	checker.evaluateAndRebuild(context.Background())
 	if rebuildCalls != 2 {
 		t.Fatalf("节点恢复后应重建: got=%d want=2", rebuildCalls)
 	}
@@ -110,7 +113,8 @@ func TestCheckerDebounce(t *testing.T) {
 		{ID: "n2.example.com", Address: "n2.example.com", Port: 443},
 	}
 
-	checker.evaluateAndRebuild(context.Background(), nodes)
+	checker.SetNodes(nodes)
+	checker.evaluateAndRebuild(context.Background())
 	if rebuildCalls != 1 {
 		t.Fatalf("首次重建次数错误: got=%d", rebuildCalls)
 	}
@@ -120,7 +124,8 @@ func TestCheckerDebounce(t *testing.T) {
 	doer.failing["n2.example.com"] = true
 	doer.mu.Unlock()
 	now = now.Add(2 * time.Second)
-	checker.evaluateAndRebuild(context.Background(), nodes)
+	checker.SetNodes(nodes)
+	checker.evaluateAndRebuild(context.Background())
 	if rebuildCalls != 1 {
 		t.Fatalf("防抖窗口内不应重建: got=%d", rebuildCalls)
 	}
@@ -130,7 +135,8 @@ func TestCheckerDebounce(t *testing.T) {
 	doer.failing["n1.example.com"] = false
 	doer.failing["n2.example.com"] = false
 	doer.mu.Unlock()
-	checker.evaluateAndRebuild(context.Background(), nodes)
+	checker.SetNodes(nodes)
+	checker.evaluateAndRebuild(context.Background())
 	if rebuildCalls != 2 {
 		t.Fatalf("超过防抖窗口后应重建: got=%d", rebuildCalls)
 	}

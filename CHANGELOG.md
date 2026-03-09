@@ -1,5 +1,19 @@
 # Changelog
 
+## [v0.2.3] - 2026-03-09
+
+### 新增
+- 增加统一运行时编排 `Runtime`，对外稳定输出只读管理 API 快照，并支持按配置周期刷新输入源。
+- 增加本地只读管理 API：`/api/v1/status`、`/api/v1/sources`、`/api/v1/nodes`、`/api/v1/candidates`、`/api/v1/health`。
+- 增加本地 JSON 状态持久化，可恢复健康检查惩罚窗口、最近探测状态与最近国家识别结果。
+- 增加管理 API 最小鉴权能力：支持静态 token + 自定义 header，未配置 token 时保持兼容的免鉴权行为。
+- 增加 source 内容扩展识别，支持 URI 列表、Clash YAML 与 Sing-box JSON 输入。
+
+### 改进
+- README 补充管理 API、状态文件、配置样例与响应示例说明，便于本地观测与排障。
+- Docker Compose 默认镜像版本、构建示例与发布脚本默认版本同步更新至 `v0.2.3`。
+- 配置层新增 `policy.refresh`、`api`、`state` 默认值归一化与校验，降低运行时配置出错概率。
+
 ## [v0.2.2] - 2026-03-09
 
 ### 新增

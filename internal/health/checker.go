@@ -34,6 +34,23 @@ func (d *defaultProbeDoer) Probe(ctx context.Context, testURL string, node domai
 // RebuildFunc 在候选集合变化时触发重建。
 type RebuildFunc func(ctx context.Context, candidates []domain.NodeMetadata) error
 
+// NodeStatus 表示健康检查的最新状态摘要。
+type NodeStatus struct {
+	LastCheckAt   time.Time `json:"last_check_at"`
+	LastReachable bool      `json:"last_reachable"`
+}
+
+// HealthSnapshot 表示当前健康检查状态快照。
+type HealthSnapshot struct {
+	Interval       time.Duration         `json:"interval"`
+	Debounce       time.Duration         `json:"debounce"`
+	TestURL        string                `json:"test_url"`
+	Timeout        time.Duration         `json:"timeout"`
+	LastCandidates []string              `json:"last_candidates"`
+	LastRebuildAt  time.Time             `json:"last_rebuild_at"`
+	Nodes          map[string]NodeStatus `json:"nodes"`
+}
+
 // Checker 负责健康检查、惩罚更新与重建触发。
 type Checker struct {
 	interval  time.Duration
@@ -48,6 +65,9 @@ type Checker struct {
 	mu             sync.Mutex
 	lastCandidates []string
 	lastRebuildAt  time.Time
+	nodeStatuses   map[string]NodeStatus
+	nodes          []domain.NodeMetadata
+	started        bool
 }
 
 type candidateStats struct {
@@ -68,14 +88,15 @@ func NewChecker(interval time.Duration, testURL string, pool *PenaltyPool, rebui
 	}
 
 	return &Checker{
-		interval:  interval,
-		debounce:  3 * time.Second,
-		testURL:   testURL,
-		timeout:   5 * time.Second,
-		doer:      &defaultProbeDoer{},
-		pool:      pool,
-		nowFunc:   time.Now,
-		rebuildFn: rebuildFn,
+		interval:     interval,
+		debounce:     3 * time.Second,
+		testURL:      testURL,
+		timeout:      5 * time.Second,
+		doer:         &defaultProbeDoer{},
+		pool:         pool,
+		nowFunc:      time.Now,
+		rebuildFn:    rebuildFn,
+		nodeStatuses: make(map[string]NodeStatus),
 	}
 }
 
@@ -91,28 +112,50 @@ func newCheckerWithDeps(interval time.Duration, testURL string, pool *PenaltyPoo
 }
 
 func (c *Checker) Start(ctx context.Context, nodes []domain.NodeMetadata) {
+	c.SetNodes(nodes)
 	if len(nodes) == 0 {
 		return
 	}
-	go c.run(ctx, nodes)
+
+	c.mu.Lock()
+	if c.started {
+		c.mu.Unlock()
+		return
+	}
+	c.started = true
+	c.mu.Unlock()
+
+	go c.run(ctx)
 }
 
-func (c *Checker) run(ctx context.Context, nodes []domain.NodeMetadata) {
+// SetNodes 更新当前健康检查候选集合。
+func (c *Checker) SetNodes(nodes []domain.NodeMetadata) {
+	copied := append([]domain.NodeMetadata(nil), nodes...)
+	c.mu.Lock()
+	c.nodes = copied
+	c.mu.Unlock()
+}
+
+func (c *Checker) run(ctx context.Context) {
 	ticker := time.NewTicker(c.interval)
 	defer ticker.Stop()
 
-	c.evaluateAndRebuild(ctx, nodes)
+	c.evaluateAndRebuild(ctx)
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			c.evaluateAndRebuild(ctx, nodes)
+			c.evaluateAndRebuild(ctx)
 		}
 	}
 }
 
-func (c *Checker) evaluateAndRebuild(ctx context.Context, nodes []domain.NodeMetadata) {
+func (c *Checker) evaluateAndRebuild(ctx context.Context) {
+	nodes := c.currentNodes()
+	if len(nodes) == 0 {
+		return
+	}
 	c.updatePenalties(ctx, nodes)
 
 	candidateStats := c.filterNodeStats(nodes)
@@ -122,7 +165,7 @@ func (c *Checker) evaluateAndRebuild(ctx context.Context, nodes []domain.NodeMet
 		return
 	}
 
-	candidateIDs := nodeIDs(candidates)
+	candidateIDs := nodeKeys(candidates)
 	if !c.shouldRebuild(candidateIDs) {
 		return
 	}
@@ -138,10 +181,16 @@ func (c *Checker) updatePenalties(ctx context.Context, nodes []domain.NodeMetada
 		reachable, _ := c.doer.Probe(nodeCtx, c.testURL, node)
 		cancel()
 
+		nodeKey := domain.NodeKey(node)
+		if nodeKey == "" {
+			continue
+		}
+		c.recordNodeStatus(nodeKey, NodeStatus{LastCheckAt: c.nowFunc(), LastReachable: reachable})
+
 		if reachable {
-			c.pool.MarkSuccess(node.ID)
+			c.pool.MarkSuccess(nodeKey)
 		} else {
-			c.pool.MarkFailure(node.ID)
+			c.pool.MarkFailure(nodeKey)
 		}
 	}
 }
@@ -154,8 +203,12 @@ func (c *Checker) filterNodeStats(nodes []domain.NodeMetadata) candidateStats {
 	ids := make([]string, 0, len(nodes))
 	nodeByID := make(map[string]domain.NodeMetadata, len(nodes))
 	for _, node := range nodes {
-		ids = append(ids, node.ID)
-		nodeByID[node.ID] = node
+		nodeKey := domain.NodeKey(node)
+		if nodeKey == "" {
+			continue
+		}
+		ids = append(ids, nodeKey)
+		nodeByID[nodeKey] = node
 	}
 
 	filtered := c.pool.FilterCandidatesWithStats(ids)
@@ -199,10 +252,64 @@ func (c *Checker) shouldRebuild(candidateIDs []string) bool {
 	return true
 }
 
-func nodeIDs(nodes []domain.NodeMetadata) []string {
+func (c *Checker) currentNodes() []domain.NodeMetadata {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return append([]domain.NodeMetadata(nil), c.nodes...)
+}
+
+func nodeKeys(nodes []domain.NodeMetadata) []string {
 	ids := make([]string, 0, len(nodes))
 	for _, node := range nodes {
-		ids = append(ids, node.ID)
+		if key := domain.NodeKey(node); key != "" {
+			ids = append(ids, key)
+		}
 	}
 	return ids
+}
+
+func (c *Checker) recordNodeStatus(nodeKey string, status NodeStatus) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.nodeStatuses == nil {
+		c.nodeStatuses = make(map[string]NodeStatus)
+	}
+	c.nodeStatuses[nodeKey] = status
+}
+
+// Snapshot 返回健康检查内部状态快照，供观测与持久化复用。
+func (c *Checker) Snapshot() HealthSnapshot {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	nodes := make(map[string]NodeStatus, len(c.nodeStatuses))
+	for key, value := range c.nodeStatuses {
+		nodes[key] = value
+	}
+
+	return HealthSnapshot{
+		Interval:       c.interval,
+		Debounce:       c.debounce,
+		TestURL:        c.testURL,
+		Timeout:        c.timeout,
+		LastCandidates: append([]string(nil), c.lastCandidates...),
+		LastRebuildAt:  c.lastRebuildAt,
+		Nodes:          nodes,
+	}
+}
+
+// RestoreSnapshot 恢复检查器状态，供重启冷启动复用。
+func (c *Checker) RestoreSnapshot(snapshot HealthSnapshot) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.lastCandidates = append([]string(nil), snapshot.LastCandidates...)
+	c.lastRebuildAt = snapshot.LastRebuildAt
+	c.nodeStatuses = make(map[string]NodeStatus, len(snapshot.Nodes))
+	for key, value := range snapshot.Nodes {
+		if key == "" {
+			continue
+		}
+		c.nodeStatuses[key] = value
+	}
 }

@@ -15,3 +15,11 @@ type NodeMetadata struct {
 	LastChecked time.Time      `json:"last_checked"`
 	RawConfig   map[string]any `json:"raw_config"`
 }
+
+// NodeKey 返回节点稳定运行时键，优先使用 Fingerprint。
+func NodeKey(node NodeMetadata) string {
+	if node.Fingerprint != "" {
+		return node.Fingerprint
+	}
+	return node.ID
+}

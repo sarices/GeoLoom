@@ -27,12 +27,192 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 - allow/block 过滤（`block` 优先）
 - 节点稳定 fingerprint 与跨 source 去重（geo 前执行，避免重复节点放大候选池）
 
-### Core / LoadBalance / Health
+### Core / LoadBalance / Health / Runtime
 - 最小可用拓扑：SOCKS 入站 + 统一 `lb-out` 出口
 - 负载策略：
   - `random`：连接级随机选择候选代理
   - `urltest`：基于探测结果选择
 - 健康检查：失败惩罚窗口、全惩罚兜底、周期统计日志
+- 运行时编排：统一 `Runtime` 快照、按 `Fingerprint` 增量刷新、source 状态跟踪
+- 管理 API：默认本地回环监听，提供 `/api/v1/status|sources|nodes|candidates|health`，可选静态 token header 鉴权
+- 健康状态持久化：本地 JSON 文件恢复惩罚窗口与最近检查状态
+- source 内容扩展：支持 URI 列表、Clash YAML、Sing-box JSON
+
+### 管理 API 与状态文件
+- 管理 API 默认建议仅监听本地回环地址，例如 `127.0.0.1:9090`，避免在未做鉴权时直接暴露到公网。
+- 默认未配置 `api.token` 时保持免鉴权；配置后，所有管理 API 路由都必须携带指定 header。
+- 默认鉴权 header 为 `X-GeoLoom-Token`，可通过 `api.auth_header` 自定义。
+- 当前只提供只读接口：
+  - `GET /api/v1/status`：运行状态、节点聚合计数、refresh/api/state 配置摘要
+  - `GET /api/v1/sources`：每个 source 的最近处理状态、输入类型、unsupported 数与错误摘要
+  - `GET /api/v1/nodes`：当前已完成 geo 解析的节点列表
+  - `GET /api/v1/candidates`：当前参与 core 的候选节点列表
+  - `GET /api/v1/health`：健康检查配置摘要、最近跟踪节点数、惩罚池与内部健康快照
+- `state.path` 指向本地 JSON 状态文件，当前保存：
+  - `Fingerprint -> penalty_until`
+  - `Fingerprint -> last_check_at / last_reachable`
+  - `Fingerprint -> last_country_code`
+- 状态恢复语义：
+  - 状态文件不存在或为空：按空状态启动，不报错
+  - 状态文件损坏：记录 warn，并降级为空状态继续启动
+  - 已过期惩罚窗口：加载时自动清理，不会错误恢复
+
+### 管理 API 响应示例
+
+#### `GET /api/v1/status`
+
+```json
+{
+  "version": "v0.2.3",
+  "started_at": "2026-03-09T10:00:00Z",
+  "last_refresh_at": "2026-03-09T10:05:00Z",
+  "source_count": 2,
+  "strategy": "random",
+  "raw_node_count": 12,
+  "deduped_node_count": 10,
+  "resolved_node_count": 9,
+  "candidate_node_count": 6,
+  "dropped_node_count": 3,
+  "core_supported_count": 6,
+  "core_unsupported_count": 1,
+  "refresh": {
+    "enabled": true,
+    "interval": "10m"
+  },
+  "api": {
+    "enabled": true,
+    "listen": "127.0.0.1:9090"
+  },
+  "state": {
+    "enabled": true,
+    "path": "geoloom-state.json"
+  }
+}
+```
+
+#### `GET /api/v1/sources`
+
+```json
+{
+  "items": [
+    {
+      "name": "remote-subscription",
+      "type": "source",
+      "url": "https://example.com/subscription.txt",
+      "normalized_url": "https://example.com/subscription.txt",
+      "input_type": "source",
+      "node_count": 8,
+      "unsupported_count": 2,
+      "success": true,
+      "updated_at": "2026-03-09T10:05:00Z"
+    },
+    {
+      "name": "local-file",
+      "type": "source",
+      "url": "sub.txt",
+      "normalized_url": "@/etc/geoloom/sub.txt",
+      "node_count": 0,
+      "unsupported_count": 0,
+      "success": false,
+      "error": "订阅拉取失败: 读取本地输入文件失败: open /etc/geoloom/sub.txt: no such file or directory",
+      "updated_at": "2026-03-09T10:05:00Z"
+    }
+  ]
+}
+```
+
+#### `GET /api/v1/nodes`
+
+```json
+{
+  "count": 2,
+  "items": [
+    {
+      "id": "socks5-1.1.1.1-1080",
+      "fingerprint": "socks5-aaaabbbbcccc",
+      "name": "hk-entry",
+      "source_names": [
+        "remote-subscription"
+      ],
+      "country_code": "HK",
+      "protocol": "socks5",
+      "address": "1.1.1.1",
+      "port": 1080,
+      "last_checked": "0001-01-01T00:00:00Z",
+      "raw_config": {
+        "address": "1.1.1.1",
+        "port": 1080,
+        "protocol": "socks5"
+      }
+    },
+    {
+      "id": "trojan-2.2.2.2-443",
+      "fingerprint": "trojan-ddddeeeeffff",
+      "name": "sg-edge",
+      "source_names": [
+        "remote-subscription",
+        "manual-node"
+      ],
+      "country_code": "SG",
+      "protocol": "trojan",
+      "address": "2.2.2.2",
+      "port": 443,
+      "last_checked": "0001-01-01T00:00:00Z",
+      "raw_config": {
+        "address": "2.2.2.2",
+        "port": 443,
+        "protocol": "trojan",
+        "sni": "edge.example.com"
+      }
+    }
+  ]
+}
+```
+
+#### `GET /api/v1/health`
+
+```json
+{
+  "config": {
+    "enabled": true,
+    "interval": "5m",
+    "url": "http://cp.cloudflare.com"
+  },
+  "summary": {
+    "tracked_nodes": 6,
+    "penalized_nodes": 1,
+    "last_rebuild_at": "2026-03-09T10:03:00Z"
+  },
+  "health": {
+    "interval": 300000000000,
+    "debounce": 30000000000,
+    "test_url": "http://cp.cloudflare.com",
+    "timeout": 5000000000,
+    "last_candidates": [
+      "socks5-aaaabbbbcccc",
+      "socks5-ddddeeeeffff"
+    ],
+    "last_rebuild_at": "2026-03-09T10:03:00Z",
+    "nodes": {
+      "socks5-aaaabbbbcccc": {
+        "last_check_at": "2026-03-09T10:04:30Z",
+        "last_reachable": true
+      }
+    }
+  },
+  "penalty_pool": {
+    "socks5-ddddeeeeffff": "2026-03-09T10:08:00Z"
+  }
+}
+```
+
+说明：
+- `status` 适合做总览卡片与配置摘要展示。
+- `health.summary` 适合做轻量状态面板；`health` 与 `penalty_pool` 适合调试与排障。
+- `health.interval`、`health.debounce`、`health.timeout` 当前按 Go `time.Duration` 的 JSON 语义输出为纳秒整数；如后续面向外部稳定开放，可再评估是否改为字符串时长。
+- 未配置 `api.token` 时，`/api/v1/*` 保持当前免鉴权行为。
+- 配置 `api.token` 后，所有管理 API 请求都需要携带 `api.auth_header` 指定的 header。
+- 调用示例：`curl -H 'X-GeoLoom-Token: your-static-token' http://127.0.0.1:9090/api/v1/status`
 
 ## 目录结构（核心）
 
@@ -73,7 +253,7 @@ go run ./cmd/geoloom -version
 
 ### 5) Docker Compose 部署（GHCR 镜像）
 
-> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.2`。
+> 适用于已发布镜像，例如 `ghcr.io/sarices/geoloom:v0.2.3`。
 
 1. 准备配置文件（示例）：
 
@@ -115,7 +295,7 @@ GeoLoom version=dev commit=unknown build_time=unknown
 生产构建建议通过 `-ldflags` 注入版本信息：
 
 ```bash
-go build -ldflags "-X main.Version=v0.2.2 -X main.Commit=$(git rev-parse --short HEAD) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/geoloom
+go build -ldflags "-X main.Version=v0.2.3 -X main.Commit=$(git rev-parse --short HEAD) -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/geoloom
 ```
 
 ## 多环境打包（build-all）
@@ -123,18 +303,18 @@ go build -ldflags "-X main.Version=v0.2.2 -X main.Commit=$(git rev-parse --short
 ### 一键打包
 
 ```bash
-bash scripts/release/build-all.sh v0.2.2
+bash scripts/release/build-all.sh v0.2.3
 ```
 
 可选参数（按顺序覆盖）：
-- `VERSION`：版本号（默认 `v0.2.2`）
+- `VERSION`：版本号（默认 `v0.2.3`）
 - `COMMIT`：提交短哈希（默认自动读取，失败回退 `unknown`）
 - `BUILD_TIME`：UTC 时间（默认当前时间，ISO8601）
 
 例如：
 
 ```bash
-bash scripts/release/build-all.sh v0.2.2 abc1234 2026-03-05T09:00:00Z
+bash scripts/release/build-all.sh v0.2.3 abc1234 2026-03-05T09:00:00Z
 ```
 
 ### 输出结构
@@ -255,10 +435,24 @@ policy:
     interval: 5m
     url: http://cp.cloudflare.com
 
+  refresh:
+    enabled: true
+    interval: 10m
+
 geo:
   mmdb_path: ""
   mmdb_url: ""
   dns_timeout: 3s
+
+api:
+  enabled: true
+  listen: 127.0.0.1:9090
+  token: ""
+  auth_header: X-GeoLoom-Token
+
+state:
+  enabled: true
+  path: geoloom-state.json
 
 sources:
   - name: local-source

@@ -78,20 +78,40 @@ func TestValidateGeoMMDBURLHTTPShouldPass(t *testing.T) {
 	}
 }
 
-func TestValidateHealthCheckDefaults(t *testing.T) {
+func TestValidateAPIDefaults(t *testing.T) {
 	t.Parallel()
 
 	cfg := baseValidConfig()
-	cfg.Policy.HealthCheck = HealthCheckConfig{Enabled: true}
+	cfg.API = APIConfig{Enabled: true}
 
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("校验失败: %v", err)
 	}
-	if cfg.Policy.HealthCheck.Interval != defaultHealthCheckInterval {
-		t.Fatalf("默认 interval 错误: got=%s", cfg.Policy.HealthCheck.Interval)
+	if cfg.API.Listen != defaultAPIListen {
+		t.Fatalf("默认 listen 错误: got=%s want=%s", cfg.API.Listen, defaultAPIListen)
 	}
-	if cfg.Policy.HealthCheck.URL != defaultHealthCheckURL {
-		t.Fatalf("默认 url 错误: got=%s", cfg.Policy.HealthCheck.URL)
+	if cfg.API.AuthHeader != defaultAPIAuthHeader {
+		t.Fatalf("默认 auth_header 错误: got=%s want=%s", cfg.API.AuthHeader, defaultAPIAuthHeader)
+	}
+	if cfg.API.Token != "" {
+		t.Fatalf("默认 token 错误: got=%s", cfg.API.Token)
+	}
+}
+
+func TestValidateAPITokenShouldPass(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseValidConfig()
+	cfg.API = APIConfig{Enabled: true, Token: "  secret-token  ", AuthHeader: "  X-Custom-Token  "}
+
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("校验失败: %v", err)
+	}
+	if cfg.API.Token != "secret-token" {
+		t.Fatalf("token 归一化错误: got=%s", cfg.API.Token)
+	}
+	if cfg.API.AuthHeader != "X-Custom-Token" {
+		t.Fatalf("auth_header 归一化错误: got=%s", cfg.API.AuthHeader)
 	}
 }
 
@@ -340,5 +360,36 @@ func TestValidateHealthCheckDisabledAllowsIncompleteFields(t *testing.T) {
 
 	if err := cfg.validate(); err != nil {
 		t.Fatalf("disabled 场景不应因 health_check 字段失败: %v", err)
+	}
+}
+
+func TestValidateRefreshDefaults(t *testing.T) {
+	t.Parallel()
+
+	cfg := baseValidConfig()
+	cfg.Policy.Refresh = RefreshConfig{Enabled: true}
+	cfg.API = APIConfig{Enabled: true}
+	cfg.State = StateConfig{Enabled: true}
+
+	if err := cfg.validate(); err != nil {
+		t.Fatalf("校验失败: %v", err)
+	}
+	if cfg.Policy.Refresh.Interval != defaultRefreshInterval {
+		t.Fatalf("默认 refresh interval 错误: got=%s", cfg.Policy.Refresh.Interval)
+	}
+	if cfg.API.Listen != defaultAPIListen {
+		t.Fatalf("默认 api listen 错误: got=%s", cfg.API.Listen)
+	}
+	if cfg.State.Path != defaultStatePath {
+		t.Fatalf("默认 state path 错误: got=%s", cfg.State.Path)
+	}
+}
+
+func TestValidateRefreshEnabledErrors(t *testing.T) {
+	t.Parallel()
+	cfg := baseValidConfig()
+	cfg.Policy.Refresh = RefreshConfig{Enabled: true, Interval: "bad"}
+	if err := cfg.validate(); err == nil {
+		t.Fatal("预期 refresh 校验失败，但得到 nil")
 	}
 }

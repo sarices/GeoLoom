@@ -21,6 +21,12 @@ const defaultMaxBodyBytes int64 = 4 * 1024 * 1024
 
 var schemeWithSeparatorPattern = regexp.MustCompile(`(?i)^[a-z][a-z0-9+.-]*://`)
 
+// FetchResult 表示 source 层抓取结果；既保留原始内容，也保留基于 URI 的基础抽取结果。
+type FetchResult struct {
+	Content []byte
+	Entries []string
+}
+
 // SubscriptionFetcher 负责订阅内容抓取与基础文本解析。
 type SubscriptionFetcher struct {
 	client       *http.Client
@@ -40,47 +46,59 @@ func NewSubscriptionFetcher(client *http.Client) *SubscriptionFetcher {
 
 // Fetch 拉取订阅并解析为链接列表。
 func (f *SubscriptionFetcher) Fetch(ctx context.Context, sourceURL string) ([]string, error) {
+	result, err := f.FetchResult(ctx, sourceURL)
+	if err != nil {
+		return nil, err
+	}
+	return result.Entries, nil
+}
+
+// FetchResult 拉取订阅并返回原始内容与基础 URI 抽取结果。
+func (f *SubscriptionFetcher) FetchResult(ctx context.Context, sourceURL string) (FetchResult, error) {
 	if f == nil || f.client == nil {
-		return nil, fmt.Errorf("订阅抓取器未初始化")
+		return FetchResult{}, fmt.Errorf("订阅抓取器未初始化")
 	}
 
 	cleaned := strings.TrimSpace(sourceURL)
 	if strings.HasPrefix(cleaned, "@") {
-		return parseEntriesFromLocalFile(cleaned)
+		content, err := readLocalFileContent(cleaned)
+		if err != nil {
+			return FetchResult{}, err
+		}
+		return FetchResult{Content: content, Entries: parseEntriesFromLines(string(content))}, nil
 	}
 
 	parsed, err := url.Parse(cleaned)
 	if err != nil {
-		return nil, fmt.Errorf("订阅地址解析失败: %w", err)
+		return FetchResult{}, fmt.Errorf("订阅地址解析失败: %w", err)
 	}
 	scheme := strings.ToLower(strings.TrimSpace(parsed.Scheme))
 	if scheme != "http" && scheme != "https" {
-		return nil, fmt.Errorf("订阅地址仅支持 http/https 或 @本地文件")
+		return FetchResult{}, fmt.Errorf("订阅地址仅支持 http/https 或 @本地文件")
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, parsed.String(), nil)
 	if err != nil {
-		return nil, fmt.Errorf("创建订阅请求失败: %w", err)
+		return FetchResult{}, fmt.Errorf("创建订阅请求失败: %w", err)
 	}
 	req.Header.Set("User-Agent", "GeoLoom/0.1")
 
 	resp, err := f.client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("请求订阅失败: %w", err)
+		return FetchResult{}, fmt.Errorf("请求订阅失败: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return nil, fmt.Errorf("订阅请求返回异常状态码: %d", resp.StatusCode)
+		return FetchResult{}, fmt.Errorf("订阅请求返回异常状态码: %d", resp.StatusCode)
 	}
 
 	body, err := io.ReadAll(io.LimitReader(resp.Body, f.maxBodyBytes))
 	if err != nil {
-		return nil, fmt.Errorf("读取订阅内容失败: %w", err)
+		return FetchResult{}, fmt.Errorf("读取订阅内容失败: %w", err)
 	}
 
-	entries := ParseEntriesFromContent(body)
-	return entries, nil
+	return FetchResult{Content: body, Entries: ParseEntriesFromContent(body)}, nil
 }
 
 // ParseEntriesFromContent 从订阅文本中提取可处理的链接。
@@ -123,7 +141,7 @@ func decodeBase64IfPossible(text string) (string, bool) {
 	return decodedText, true
 }
 
-func parseEntriesFromLocalFile(sourceURL string) ([]string, error) {
+func readLocalFileContent(sourceURL string) ([]byte, error) {
 	filePath := strings.TrimSpace(strings.TrimPrefix(sourceURL, "@"))
 	if filePath == "" {
 		return nil, fmt.Errorf("本地文件路径不能为空")
@@ -133,7 +151,14 @@ func parseEntriesFromLocalFile(sourceURL string) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("读取本地输入文件失败: %w", err)
 	}
+	return content, nil
+}
 
+func parseEntriesFromLocalFile(sourceURL string) ([]string, error) {
+	content, err := readLocalFileContent(sourceURL)
+	if err != nil {
+		return nil, err
+	}
 	return parseEntriesFromLines(string(content)), nil
 }
 
