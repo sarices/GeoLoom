@@ -25,7 +25,7 @@ require_command "go"
 require_command "tar"
 require_command "zip"
 
-VERSION="${1:-${VERSION:-v0.2.6}}"
+VERSION="${1:-${VERSION:-v0.2.7}}"
 COMMIT="${2:-${COMMIT:-$(resolve_commit)}}"
 BUILD_TIME="${3:-${BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}}"
 
