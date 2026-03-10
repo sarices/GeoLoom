@@ -83,9 +83,10 @@ func TestDiffCandidateFingerprintsStableAcrossOrder(t *testing.T) {
 
 func TestRuntimePayloadMethods(t *testing.T) {
 	t.Parallel()
-	rt := &Runtime{cfg: config.Config{}}
+	rt := &Runtime{cfg: config.Config{Policy: config.PolicyConfig{Strategy: config.StrategyHybrid, HybridTopK: 5}}}
 	rt.snapshot = RuntimeSnapshot{
 		Version:          "v1",
+		Strategy:         config.StrategyHybrid,
 		Sources:          []SourceStatus{{Name: "s1", UnsupportedCount: 1}},
 		Candidates:       []domain.NodeMetadata{{Fingerprint: "f1"}},
 		ResolvedNodes:    []domain.NodeMetadata{{Fingerprint: "f1"}},
@@ -99,8 +100,15 @@ func TestRuntimePayloadMethods(t *testing.T) {
 	if len(rt.SourcesPayload().(map[string]any)["items"].([]SourceStatus)) != 1 {
 		t.Fatal("SourcesPayload 错误")
 	}
-	if rt.StatusPayload().(map[string]any)["raw_node_count"].(int) != 2 {
+	status := rt.StatusPayload().(map[string]any)
+	if status["raw_node_count"].(int) != 2 {
 		t.Fatal("StatusPayload 聚合字段错误")
+	}
+	if status["strategy"].(string) != config.StrategyHybrid {
+		t.Fatal("StatusPayload strategy 错误")
+	}
+	if rt.cfg.Policy.HybridTopK != 5 {
+		t.Fatalf("runtime config 应保留 hybrid_top_k: got=%d want=5", rt.cfg.Policy.HybridTopK)
 	}
 	if rt.HealthPayload().(map[string]any)["summary"].(map[string]any)["penalized_nodes"].(int) != 1 {
 		t.Fatal("HealthPayload 摘要错误")
@@ -231,6 +239,23 @@ func TestRefreshOnceShouldDriveStartThenSkipThenRebuild(t *testing.T) {
 	}
 	if snapshot.Sources[0].Success != true || snapshot.Sources[0].NodeCount != 2 || snapshot.Sources[0].InputType != string(parser.InputTypeSource) {
 		t.Fatalf("第三轮 source 状态错误: %+v", snapshot.Sources)
+	}
+}
+
+func TestRefreshOnceShouldRebuildWhenCandidateScoresChange(t *testing.T) {
+	t.Parallel()
+	rt := &Runtime{cfg: config.Config{Policy: config.PolicyConfig{Strategy: config.StrategyRandom}}, checker: health.NewChecker(30*time.Second, "", health.NewPenaltyPool(5*time.Minute), nil)}
+	core := &fakeRuntimeCore{}
+	rt.core = core
+	rt.snapshot = RuntimeSnapshot{Candidates: []domain.NodeMetadata{{Fingerprint: "a", HealthScore: 100}, {Fingerprint: "b", HealthScore: 20}}}
+	changed := []domain.NodeMetadata{{Fingerprint: "a", HealthScore: 40}, {Fingerprint: "b", HealthScore: 95}}
+	before := rt.Snapshot().Candidates
+	added, removed, _ := diffCandidateFingerprints(before, changed)
+	if added != 0 || removed != 0 {
+		t.Fatalf("key 集合不应变化: added=%d removed=%d", added, removed)
+	}
+	if candidateSelectionSignature(before) == candidateSelectionSignature(changed) {
+		t.Fatal("评分变化应导致候选签名变化")
 	}
 }
 

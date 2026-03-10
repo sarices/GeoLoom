@@ -155,9 +155,28 @@ func (r *Runtime) RefreshOnce(ctx context.Context) (RefreshResult, error) {
 		return RefreshResult{}, fmt.Errorf("过滤后无可用候选节点")
 	}
 
+	healthSnapshot := r.checker.Snapshot()
+	if healthSnapshot.Nodes == nil {
+		healthSnapshot.Nodes = make(map[string]health.NodeStatus)
+	}
+	for i := range filtered.Candidates {
+		key := domain.NodeKey(filtered.Candidates[i])
+		if key == "" {
+			continue
+		}
+		if status, ok := healthSnapshot.Nodes[key]; ok {
+			filtered.Candidates[i].HealthScore = status.Score
+			continue
+		}
+		healthSnapshot.Nodes[key] = health.NodeStatus{Score: 100}
+		filtered.Candidates[i].HealthScore = 100
+	}
+
 	before := r.Snapshot().Candidates
 	added, removed, unchanged := diffCandidateFingerprints(before, filtered.Candidates)
-	rebuildNeeded := len(before) == 0 || added > 0 || removed > 0
+	beforeSignature := candidateSelectionSignature(before)
+	afterSignature := candidateSelectionSignature(filtered.Candidates)
+	rebuildNeeded := len(before) == 0 || added > 0 || removed > 0 || beforeSignature != afterSignature
 	if err := r.applyCandidates(ctx, filtered.Candidates, rebuildNeeded); err != nil {
 		return RefreshResult{}, err
 	}
@@ -175,7 +194,7 @@ func (r *Runtime) RefreshOnce(ctx context.Context) (RefreshResult, error) {
 		Candidates:       append([]domain.NodeMetadata(nil), filtered.Candidates...),
 		Dropped:          append([]domain.NodeMetadata(nil), filtered.Dropped...),
 		Sources:          append([]SourceStatus(nil), sources...),
-		Health:           r.checker.Snapshot(),
+		Health:           healthSnapshot,
 		PenaltyPool:      r.penalty.Snapshot(),
 		CoreStats:        r.core.LastBuildStats(),
 		RawNodeCount:     len(rawNodes),
@@ -293,6 +312,8 @@ func (r *Runtime) HealthPayload() any {
 		"summary": map[string]any{
 			"tracked_nodes":   len(snapshot.Health.Nodes),
 			"penalized_nodes": len(snapshot.PenaltyPool),
+			"ready_nodes":     countReadyNodes(snapshot.Candidates),
+			"degraded_nodes":  countDegradedNodes(snapshot.Candidates),
 			"last_rebuild_at": snapshot.Health.LastRebuildAt,
 		},
 		"health":       snapshot.Health,
@@ -368,6 +389,51 @@ func diffCandidateFingerprints(before, after []domain.NodeMetadata) (added, remo
 		}
 	}
 	return
+}
+
+func candidateSelectionSignature(nodes []domain.NodeMetadata) string {
+	parts := make([]string, 0, len(nodes))
+	for _, node := range nodes {
+		key := domain.NodeKey(node)
+		if key == "" {
+			continue
+		}
+		parts = append(parts, fmt.Sprintf("%s#%d", key, scoreBucket(node.HealthScore)))
+	}
+	return strings.Join(parts, "|")
+}
+
+func scoreBucket(score int) int {
+	switch {
+	case score >= 90:
+		return 3
+	case score >= 70:
+		return 2
+	case score >= 40:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func countReadyNodes(nodes []domain.NodeMetadata) int {
+	count := 0
+	for _, node := range nodes {
+		if node.HealthScore >= 80 {
+			count++
+		}
+	}
+	return count
+}
+
+func countDegradedNodes(nodes []domain.NodeMetadata) int {
+	count := 0
+	for _, node := range nodes {
+		if node.HealthScore > 0 && node.HealthScore < 80 {
+			count++
+		}
+	}
+	return count
 }
 
 func collectNodesDetailed(ctx context.Context, cfg config.Config, configPath string, dispatcher *parser.Dispatcher) ([]domain.NodeMetadata, []domain.NodeMetadata, []SourceStatus, error) {
