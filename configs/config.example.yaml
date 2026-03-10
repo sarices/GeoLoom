@@ -14,10 +14,15 @@ gateway:
   socks_port: 1080
 
 policy:
-  # 可选：random / urltest
-  # - random：连接级随机选择候选节点
-  # - urltest：基于探测结果选择候选节点
+  # 可选：random / urltest / hybrid
+  # - random：全候选 weighted-random，连接级随机时更倾向高质量候选节点
+  # - urltest：基于探测结果选择当前更优候选节点
+  # - hybrid：先聚焦当前高质量候选子集，再在子集内做 weighted-random
   strategy: random
+
+  # 仅对 hybrid 生效：高质量候选子集的基础大小。
+  # 若 cutoff 名次存在相同 health_score，会把同分节点一并纳入，因此最终子集大小可能大于该值。
+  hybrid_top_k: 3
 
   filter:
     # ISO 3166-1 Alpha-2 国家代码白名单；为空表示不过滤。

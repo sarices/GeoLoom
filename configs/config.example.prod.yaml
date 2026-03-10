@@ -12,8 +12,12 @@ gateway:
   socks_port: 1080
 
 policy:
-  # 生产环境更推荐 `urltest`，便于结合健康探测选择候选节点。
+  # 生产环境可按语义选择：`urltest` 追求当前单优选；`hybrid` 在高质量子集内分流；`random` 为全候选 weighted-random。
   strategy: urltest
+
+  # 仅对 hybrid 生效：高质量候选子集的基础大小。
+  # 若 cutoff 名次存在相同 health_score，会把同分节点一并纳入，因此最终子集大小可能大于该值。
+  hybrid_top_k: 3
 
   filter:
     # 可按部署需求填写国家白名单/黑名单，例如 [HK, SG, JP]。

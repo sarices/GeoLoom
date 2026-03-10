@@ -32,8 +32,9 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 ### Core / LoadBalance / Health / Runtime
 - 最小可用拓扑：SOCKS 入站 + 统一 `lb-out` 出口
 - 负载策略：
-  - `random`：连接级随机选择候选代理
-  - `urltest`：基于探测结果选择
+  - `random`：基于 `health_score` 的全候选 weighted-random，连接级随机时更倾向高质量候选代理
+  - `urltest`：基于主动探测结果选择当前更优单节点
+  - `hybrid`：先收敛到当前高质量候选子集，再在子集内做 weighted-random；可通过 `policy.hybrid_top_k` 控制基础子集大小，若 cutoff 名次存在并列 `health_score`，会把同分节点一并纳入
 - 健康检查：失败惩罚窗口、全惩罚兜底、周期统计日志
 - 运行时编排：统一 `Runtime` 快照、按 `Fingerprint` 增量刷新、source 状态跟踪
 - 管理 API：默认本地回环监听，提供 `/api/v1/status|sources|nodes|candidates|health|logs`，可选静态 token header 鉴权
@@ -143,9 +144,9 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
       "port": 1080,
       "last_checked": "0001-01-01T00:00:00Z",
       "raw_config": {
+        "protocol": "socks5",
         "address": "1.1.1.1",
-        "port": 1080,
-        "protocol": "socks5"
+        "port": 1080
       }
     },
     {
@@ -162,15 +163,104 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
       "port": 443,
       "last_checked": "0001-01-01T00:00:00Z",
       "raw_config": {
+        "protocol": "trojan",
         "address": "2.2.2.2",
         "port": 443,
-        "protocol": "trojan",
         "sni": "edge.example.com"
       }
     }
   ]
 }
 ```
+
+#### `GET /api/v1/candidates`
+
+```json
+{
+  "count": 3,
+  "items": [
+    {
+      "id": "trojan-2.2.2.2-443",
+      "fingerprint": "trojan-ddddeeeeffff",
+      "name": "sg-edge",
+      "source_names": [
+        "remote-subscription",
+        "manual-node"
+      ],
+      "country_code": "SG",
+      "protocol": "trojan",
+      "address": "2.2.2.2",
+      "port": 443,
+      "last_checked": "0001-01-01T00:00:00Z",
+      "health_score": 93,
+      "raw_config": {
+        "protocol": "trojan",
+        "address": "2.2.2.2",
+        "port": 443,
+        "sni": "edge.example.com"
+      }
+    },
+    {
+      "id": "socks5-1.1.1.1-1080",
+      "fingerprint": "socks5-aaaabbbbcccc",
+      "name": "hk-entry",
+      "source_names": [
+        "remote-subscription"
+      ],
+      "country_code": "HK",
+      "protocol": "socks5",
+      "address": "1.1.1.1",
+      "port": 1080,
+      "last_checked": "0001-01-01T00:00:00Z",
+      "health_score": 78,
+      "raw_config": {
+        "protocol": "socks5",
+        "address": "1.1.1.1",
+        "port": 1080
+      }
+    },
+    {
+      "id": "vmess-3.3.3.3-443",
+      "fingerprint": "vmess-111122223333",
+      "name": "jp-backup",
+      "source_names": [
+        "remote-subscription"
+      ],
+      "country_code": "JP",
+      "protocol": "vmess",
+      "address": "3.3.3.3",
+      "port": 443,
+      "last_checked": "0001-01-01T00:00:00Z",
+      "health_score": 42,
+      "raw_config": {
+        "protocol": "vmess",
+        "address": "3.3.3.3",
+        "port": 443,
+        "security": "tls"
+      }
+    }
+  ]
+}
+```
+
+说明：
+- `items` 已按当前 runtime 候选优先顺序返回，高分节点通常会排在前面。
+- `health_score` 是 weighted-random 的输入分值，当前会映射为离散权重而不是直接作为概率值使用。
+- 若 `policy.strategy=random`，GeoLoom 会基于这里的候选顺序与 `health_score` 对全候选生成 weighted-random 配置；若为 `hybrid`，则仅截取当前高质量子集后再生成 weighted-random；`policy.hybrid_top_k` 表示基础截断数量，若 cutoff 名次存在并列 `health_score` 会一并纳入；若为 `urltest`，则仍沿用 sing-box `urltest` 行为。
+
+#### `/api/v1/nodes`、`/api/v1/candidates`、`/api/v1/health` 字段边界对照
+
+| 视图 | 主要用途 | 数据范围 | 是否包含运行时排序 | 是否包含质量分值 | 关键字段 | 适合场景 |
+| --- | --- | --- | --- | --- | --- | --- |
+| `/api/v1/nodes` | 展示解析 + Geo 后的节点全量视图 | `resolved_nodes` | 否 | 否 | `id`、`fingerprint`、`source_names`、`country_code`、`protocol`、`address`、`port`、`raw_config` | 节点清单、来源排查、协议/地域分布查看 |
+| `/api/v1/candidates` | 展示当前参与 core 的候选集合 | `candidates` | 是 | 是，`health_score` | `/api/v1/nodes` 共有字段 + `health_score` | 观察当前生效候选、weighted-random 倾斜方向、候选优先级 |
+| `/api/v1/health` | 展示健康检查与 penalty 的运行时观测 | health checker + penalty pool 内部状态 | 间接包含（`health.last_candidates`） | 是，`health.nodes[*].score` | `summary.ready_nodes`、`summary.degraded_nodes`、`health.nodes[*].success_count`、`failure_count`、`consecutive_failures`、`score`、`penalty_pool` | 健康排障、稳定性分析、解释 why 某节点被降权/惩罚 |
+
+补充说明：
+- `/api/v1/nodes` 更偏静态视图，回答“系统识别到了哪些节点”。
+- `/api/v1/candidates` 更偏选路视图，回答“当前真正参与 core 选路的是哪些节点”。
+- `/api/v1/health` 更偏观测视图，回答“这些节点最近为什么被优先、降权或惩罚”。
+- 若只关心当前可用出口优先级，优先看 `/api/v1/candidates`；若要解释候选质量变化原因，再联动看 `/api/v1/health`。
 
 #### `GET /api/v1/health`
 
@@ -184,6 +274,8 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
   "summary": {
     "tracked_nodes": 6,
     "penalized_nodes": 1,
+    "ready_nodes": 4,
+    "degraded_nodes": 1,
     "last_rebuild_at": "2026-03-09T10:03:00Z"
   },
   "health": {
@@ -199,7 +291,13 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
     "nodes": {
       "socks5-aaaabbbbcccc": {
         "last_check_at": "2026-03-09T10:04:30Z",
-        "last_reachable": true
+        "last_reachable": true,
+        "last_success_at": "2026-03-09T10:04:30Z",
+        "last_failure_at": "2026-03-09T09:58:00Z",
+        "consecutive_failures": 0,
+        "success_count": 12,
+        "failure_count": 2,
+        "score": 93
       }
     }
   },
@@ -252,6 +350,9 @@ GeoLoom 是一个基于 Go 的代理节点聚合与筛选工具：
 说明：
 - `status` 适合做总览卡片与配置摘要展示。
 - `health.summary` 适合做轻量状态面板；`health` 与 `penalty_pool` 适合调试与排障。
+- `candidates.items[*].health_score` 表示当前 runtime 为 weighted-random 计算后的候选质量分值；冷启动或缺少历史健康数据时可退化为默认分值。
+- `hybrid` 默认使用 `policy.hybrid_top_k=3` 作为高质量子集的基础大小；若 cutoff 名次存在并列分数，会把同分节点一并纳入，避免硬截断。
+- `health.nodes[*].score` 与 success/failure 统计字段可用于观察节点近期稳定性，但当前仍是基于周期探测的最小评分模型，并非真实流量反馈。
 - `logs` 适合做控制台只读日志面板与最近运行事件排查。
 - `health.interval`、`health.debounce`、`health.timeout` 当前按 Go `time.Duration` 的 JSON 语义输出为纳秒整数；如后续面向外部稳定开放，可再评估是否改为字符串时长。
 - 未配置 `api.token` 时，`/api/v1/*` 保持当前免鉴权行为。
@@ -459,7 +560,8 @@ gateway:
   socks_port: 1080
 
 policy:
-  strategy: random
+  strategy: random # 可选 random / urltest / hybrid
+  hybrid_top_k: 3 # 仅对 hybrid 生效；若 cutoff 分数并列，最终入池数可能大于该值
   filter:
     allow: []
     block: []
@@ -518,7 +620,8 @@ gateway:
   socks_port: 1080
 
 policy:
-  strategy: random
+  strategy: random # 可选 random / urltest / hybrid
+  hybrid_top_k: 3 # 仅对 hybrid 生效；若 cutoff 分数并列，最终入池数可能大于该值
   filter:
     allow: []
     block: []

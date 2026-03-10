@@ -31,10 +31,10 @@
 - **缓存机制**：节点 IP 对应的国家信息应缓存，避免重复解析。
 - **动态参数**：支持在启动或运行时通过配置文件更新 `Include_Regions` (如：仅用 JP, US) 和 `Exclude_Regions` (如：禁用 CN, RU)。
 
-### 3.3 随机转发策略
+### 3.3 随机 / 加权转发策略
 
-- **Stateless Random**：每次 TCP/UDP 握手请求随机选择一个符合地域要求的 Outbound。
-- **Weighted Load Balance**：根据节点延迟测试结果分配权重，延迟越低，被选中的概率越高。
+- **Stateless Random**：每次 TCP/UDP 握手请求在候选集合中做连接级随机选择。
+- **Weighted Load Balance**：根据健康探测与质量评分分配权重，质量越高，被选中的概率越高。
 
 ---
 
@@ -63,7 +63,8 @@ gateway:
   socks_port: 1080
 
 policy:
-  strategy: "random" # 随机转发
+  strategy: "random" # 可选 random（全候选 weighted-random）/ urltest（单优选）/ hybrid（高质量子集 weighted-random）
+  hybrid_top_k: 3 # 仅对 hybrid 生效；表示高质量子集的基础大小，若 cutoff 分数并列会一并纳入
   filter:
     allow: ["US", "SG", "JP"] # 仅允许这些地区
     block: ["CN"] # 显式禁止
@@ -98,9 +99,9 @@ func createSingBoxOptions(nodes []NodeMetadata) (*option.Options, error) {
         tags = append(tags, node.ID)
     }
 
-    // 添加负载均衡器 (URLTest 或 Selector)
+    // 添加负载均衡器（URLTest 或 weighted-random / hybrid weighted-random）
     balancer := option.Outbound{
-        Type: "urltest", // 或者自定义随机逻辑
+        Type: "urltest", // 或 geoloom 自定义 weighted-random（random / hybrid）
         Tag:  "lb-out",
         URLTestOptions: option.URLTestOutboundOptions{
             Outbounds: tags,
