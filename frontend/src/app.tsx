@@ -177,9 +177,9 @@ function renderPage(active: NavKey, snapshot: ApiSnapshot, t: (key: string, args
     case 'sources':
       return <SourcesPage sources={snapshot.sources} />
     case 'nodes':
-      return <NodesPage title={t('nodesTitle')} nodes={snapshot.nodes} />
+      return <NodesPage title={t('nodesTitle')} nodes={snapshot.nodes} variant="nodes" />
     case 'candidates':
-      return <NodesPage title={t('candidatesTitle')} nodes={snapshot.candidates} />
+      return <NodesPage title={t('candidatesTitle')} nodes={snapshot.candidates} variant="candidates" />
     case 'health':
       return <HealthPage health={snapshot.health} />
     case 'logs':

@@ -18,8 +18,8 @@ export function HealthPage({ health }: { health: HealthResponse }) {
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         <MetricCard label={t('trackedNodes')} value={health.summary.tracked_nodes} accent="mint" hint={`interval ${health.config.interval}`} />
         <MetricCard label={t('penalizedNodes')} value={health.summary.penalized_nodes} accent="coral" hint={health.config.url} />
-        <MetricCard label="debounce" value={formatDurationNs(health.health.debounce)} accent="gold" hint={`${health.health.debounce} ns`} />
-        <MetricCard label="timeout" value={formatDurationNs(health.health.timeout)} accent="gold" hint={`${health.health.timeout} ns`} />
+        <MetricCard label={t('readyNodes')} value={health.summary.ready_nodes} accent="mint" hint={t('weightedRandom')} />
+        <MetricCard label={t('degradedNodes')} value={health.summary.degraded_nodes} accent="gold" hint={t('healthTitle')} />
       </div>
 
       <div className="grid gap-6 xl:grid-cols-[1.08fr_0.92fr]">
@@ -28,6 +28,8 @@ export function HealthPage({ health }: { health: HealthResponse }) {
           <div className="space-y-3 text-sm text-text-main">
             <div className="flex items-center justify-between rounded-[20px] bg-card-muted px-4 py-3"><span>enabled</span><Badge tone={health.config.enabled ? 'good' : 'bad'}>{health.config.enabled ? t('yes') : t('no')}</Badge></div>
             <div className="flex items-center justify-between rounded-[20px] bg-card-muted px-4 py-3"><span>interval</span><span>{health.config.interval}</span></div>
+            <div className="flex items-center justify-between rounded-[20px] bg-card-muted px-4 py-3"><span>debounce</span><span>{formatDurationNs(health.health.debounce)}</span></div>
+            <div className="flex items-center justify-between rounded-[20px] bg-card-muted px-4 py-3"><span>timeout</span><span>{formatDurationNs(health.health.timeout)}</span></div>
             <div className="flex items-center justify-between rounded-[20px] bg-card-muted px-4 py-3"><span>last rebuild</span><span>{formatDate(health.summary.last_rebuild_at)}</span></div>
             <div className="rounded-[22px] bg-card-muted px-4 py-4">
               <div className="text-text-soft">last candidates</div>
@@ -39,7 +41,7 @@ export function HealthPage({ health }: { health: HealthResponse }) {
         </ShellCard>
 
         <ShellCard tone="muted">
-          <SectionTitle title={t('penaltyPool')} description={trackedEntries.length === 0 ? 'idle' : `${trackedEntries.length} tracked`} />
+          <SectionTitle title={t('penaltyPool')} description={penaltyEntries.length === 0 ? 'idle' : `${penaltyEntries.length} items`} />
           <div className="space-y-3">
             {penaltyEntries.length === 0 ? (
               <div className="rounded-[22px] bg-shell-strong px-4 py-8 text-sm text-text-soft">—</div>
@@ -67,7 +69,15 @@ export function HealthPage({ health }: { health: HealthResponse }) {
                   <div className="break-all font-medium">{fingerprint}</div>
                   <div className="mt-3 flex flex-wrap items-center gap-3 text-text-soft">
                     <Badge tone={item.last_reachable ? 'good' : 'bad'}>{item.last_reachable ? t('yes') : t('no')}</Badge>
+                    <Badge tone={item.score >= 80 ? 'good' : 'warn'}>{`${t('score')} ${item.score}`}</Badge>
                     <span>{formatDate(item.last_check_at)}</span>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-text-soft md:grid-cols-2 xl:grid-cols-3">
+                    <div>{t('successCount')}: {item.success_count}</div>
+                    <div>{t('failureCount')}: {item.failure_count}</div>
+                    <div>{t('consecutiveFailures')}: {item.consecutive_failures}</div>
+                    <div>{t('lastSuccessAt')}: {formatDate(item.last_success_at)}</div>
+                    <div>{t('lastFailureAt')}: {formatDate(item.last_failure_at)}</div>
                   </div>
                 </div>
               ))

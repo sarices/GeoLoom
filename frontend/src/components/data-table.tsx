@@ -15,6 +15,8 @@ export function DataTable<T>({
   columns,
   searchableText,
   getRowKey,
+  titleAction,
+  emptyLabel,
 }: {
   title: string
   description?: string
@@ -22,6 +24,8 @@ export function DataTable<T>({
   columns: Column<T>[]
   searchableText: (row: T) => string
   getRowKey: (row: T, index: number) => string | number
+  titleAction?: ReactNode
+  emptyLabel?: string
 }) {
   const { t } = useI18n()
   const [keyword, setKeyword] = useState('')
@@ -41,18 +45,21 @@ export function DataTable<T>({
           title={title}
           description={description}
           action={
-            <input
-              value={keyword}
-              onChange={(event) => setKeyword(event.target.value)}
-              placeholder={t('searchPlaceholder')}
-              className="field w-full max-w-60"
-            />
+            <div className="flex w-full flex-col items-stretch gap-3 xl:w-auto xl:items-end">
+              {titleAction}
+              <input
+                value={keyword}
+                onChange={(event) => setKeyword(event.target.value)}
+                placeholder={t('searchPlaceholder')}
+                className="field w-full max-w-60"
+              />
+            </div>
           }
         />
         <div className="text-sm text-text-soft">{t('pageCount', { count: filtered.length })}</div>
       </div>
       {filtered.length === 0 ? (
-        <div className="px-6 py-12 text-sm text-text-soft">{t('empty')}</div>
+        <div className="px-6 py-12 text-sm text-text-soft">{emptyLabel ?? t('empty')}</div>
       ) : (
         <div className="overflow-x-auto px-3 pb-3">
           <table className="min-w-full border-separate border-spacing-y-3 text-left text-sm">

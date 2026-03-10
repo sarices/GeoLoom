@@ -41,6 +41,7 @@ export type NodeItem = {
   address: string
   port: number
   last_checked: string
+  health_score?: number
   raw_config: Record<string, unknown>
 }
 
@@ -58,6 +59,8 @@ export type HealthResponse = {
   summary: {
     tracked_nodes: number
     penalized_nodes: number
+    ready_nodes: number
+    degraded_nodes: number
     last_rebuild_at: string
   }
   health: {
@@ -67,7 +70,19 @@ export type HealthResponse = {
     timeout: number
     last_candidates: string[]
     last_rebuild_at: string
-    nodes: Record<string, { last_check_at: string; last_reachable: boolean }>
+    nodes: Record<
+      string,
+      {
+        last_check_at: string
+        last_reachable: boolean
+        last_success_at: string
+        last_failure_at: string
+        consecutive_failures: number
+        success_count: number
+        failure_count: number
+        score: number
+      }
+    >
   }
   penalty_pool: Record<string, string>
 }
@@ -81,6 +96,8 @@ type RawHealthResponse = {
   summary: {
     tracked_nodes: number
     penalized_nodes: number
+    ready_nodes?: number
+    degraded_nodes?: number
     last_rebuild_at: string
   }
   health: {
@@ -90,7 +107,21 @@ type RawHealthResponse = {
     timeout: number
     last_candidates: string[] | null
     last_rebuild_at: string
-    nodes: Record<string, { last_check_at: string; last_reachable: boolean }> | null
+    nodes:
+      | Record<
+          string,
+          {
+            last_check_at: string
+            last_reachable: boolean
+            last_success_at?: string
+            last_failure_at?: string
+            consecutive_failures?: number
+            success_count?: number
+            failure_count?: number
+            score?: number
+          }
+        >
+      | null
   }
   penalty_pool: Record<string, string> | null
 }
@@ -203,12 +234,33 @@ function normalizeRecord<T>(value: Record<string, T> | null | undefined) {
 }
 
 function normalizeHealthResponse(health: RawHealthResponse): HealthResponse {
+  const normalizedNodes = Object.fromEntries(
+    Object.entries(normalizeRecord(health.health.nodes)).map(([key, value]) => [
+      key,
+      {
+        last_check_at: value.last_check_at ?? '',
+        last_reachable: Boolean(value.last_reachable),
+        last_success_at: value.last_success_at ?? '',
+        last_failure_at: value.last_failure_at ?? '',
+        consecutive_failures: value.consecutive_failures ?? 0,
+        success_count: value.success_count ?? 0,
+        failure_count: value.failure_count ?? 0,
+        score: value.score ?? 0,
+      },
+    ]),
+  )
+
   return {
     ...health,
+    summary: {
+      ...health.summary,
+      ready_nodes: health.summary.ready_nodes ?? 0,
+      degraded_nodes: health.summary.degraded_nodes ?? 0,
+    },
     health: {
       ...health.health,
       last_candidates: normalizeStringArray(health.health.last_candidates),
-      nodes: normalizeRecord(health.health.nodes),
+      nodes: normalizedNodes,
     },
     penalty_pool: normalizeRecord(health.penalty_pool),
   }

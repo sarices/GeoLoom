@@ -5,11 +5,15 @@ export function MetricCard({
   value,
   accent,
   hint,
+  active = false,
+  onClick,
 }: {
   label: string
   value: string | number
   accent: 'mint' | 'gold' | 'coral'
   hint?: string
+  active?: boolean
+  onClick?: () => void
 }) {
   const accentMap = {
     mint: 'bg-accent-main/12 text-accent-main',
@@ -17,15 +21,29 @@ export function MetricCard({
     coral: 'bg-accent-coral/18 text-[#a14825] dark:text-accent-coral',
   }
 
-  return (
-    <ShellCard className="min-h-[172px]">
-      <div className="flex h-full flex-col justify-between gap-7">
-        <div className={`inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.08em] uppercase ${accentMap[accent]}`}>{label}</div>
-        <div>
-          <div className="font-display text-[2.6rem] leading-none tracking-[-0.05em] text-text-main">{value}</div>
-          {hint ? <div className="mt-2.5 text-sm leading-6 text-text-soft">{hint}</div> : null}
-        </div>
+  const content = (
+    <div className="flex h-full flex-col justify-between gap-7">
+      <div className={`inline-flex w-fit rounded-full px-3 py-1 text-[11px] font-semibold tracking-[0.08em] uppercase ${accentMap[accent]}`}>{label}</div>
+      <div>
+        <div className="font-display text-[2.6rem] leading-none tracking-[-0.05em] text-text-main">{value}</div>
+        {hint ? <div className="mt-2.5 text-sm leading-6 text-text-soft">{hint}</div> : null}
       </div>
-    </ShellCard>
+    </div>
   )
+
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        onClick={onClick}
+        className={`block w-full text-left transition ${active ? 'scale-[1.01]' : 'hover:-translate-y-0.5'}`}
+      >
+        <ShellCard className={`min-h-[172px] ${active ? 'ring-2 ring-accent-main/35' : ''}`}>
+          {content}
+        </ShellCard>
+      </button>
+    )
+  }
+
+  return <ShellCard className="min-h-[172px]">{content}</ShellCard>
 }
