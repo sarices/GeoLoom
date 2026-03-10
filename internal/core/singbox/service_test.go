@@ -250,9 +250,9 @@ func TestServiceEnsureRegistryContext(t *testing.T) {
 	if registry := service.FromContext[option.OutboundOptionsRegistry](ctx); registry == nil {
 		t.Fatal("缺少 OutboundOptionsRegistry")
 	} else if created, ok := registry.CreateOptions(geoloomRandomOutboundType); !ok {
-		t.Fatalf("未注册 geoloom random type: %s", geoloomRandomOutboundType)
+		t.Fatalf("未注册 geoloom weighted-random type: %s", geoloomRandomOutboundType)
 	} else if _, typeOK := created.(*geoloomRandomOutboundOptions); !typeOK {
-		t.Fatalf("geoloom random options 类型错误: %T", created)
+		t.Fatalf("geoloom weighted-random options 类型错误: %T", created)
 	}
 	if registry := service.FromContext[option.OutboundOptionsRegistry](ctx); registry == nil {
 		t.Fatal("缺少 OutboundOptionsRegistry")

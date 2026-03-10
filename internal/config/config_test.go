@@ -45,15 +45,86 @@ func TestValidateGeoDNSTimeoutInvalid(t *testing.T) {
 func TestValidatePolicyStrategyNormalize(t *testing.T) {
 	t.Parallel()
 
-	cfg := baseValidConfig()
-	cfg.Policy.Strategy = "UNKNOWN"
+	t.Run("未知策略回退 random", func(t *testing.T) {
+		t.Parallel()
+		cfg := baseValidConfig()
+		cfg.Policy.Strategy = "UNKNOWN"
 
-	if err := cfg.validate(); err != nil {
-		t.Fatalf("校验失败: %v", err)
-	}
-	if cfg.Policy.Strategy != StrategyRandom {
-		t.Fatalf("策略回退错误: got=%s want=%s", cfg.Policy.Strategy, StrategyRandom)
-	}
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("校验失败: %v", err)
+		}
+		if cfg.Policy.Strategy != StrategyRandom {
+			t.Fatalf("策略回退错误: got=%s want=%s", cfg.Policy.Strategy, StrategyRandom)
+		}
+	})
+
+	t.Run("hybrid 策略应保留", func(t *testing.T) {
+		t.Parallel()
+		cfg := baseValidConfig()
+		cfg.Policy.Strategy = "  HYBRID  "
+
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("校验失败: %v", err)
+		}
+		if cfg.Policy.Strategy != StrategyHybrid {
+			t.Fatalf("策略归一化错误: got=%s want=%s", cfg.Policy.Strategy, StrategyHybrid)
+		}
+	})
+
+	t.Run("hybrid_top_k 缺失时使用默认值", func(t *testing.T) {
+		t.Parallel()
+		cfg := baseValidConfig()
+
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("校验失败: %v", err)
+		}
+		if cfg.Policy.HybridTopK != defaultHybridTopK {
+			t.Fatalf("hybrid_top_k 默认值错误: got=%d want=%d", cfg.Policy.HybridTopK, defaultHybridTopK)
+		}
+	})
+
+	t.Run("hybrid_top_k 为 0 时回退默认值", func(t *testing.T) {
+		t.Parallel()
+		cfg := baseValidConfig()
+		cfg.Policy.HybridTopK = 0
+
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("校验失败: %v", err)
+		}
+		if cfg.Policy.HybridTopK != defaultHybridTopK {
+			t.Fatalf("hybrid_top_k 回退错误: got=%d want=%d", cfg.Policy.HybridTopK, defaultHybridTopK)
+		}
+	})
+
+	t.Run("hybrid_top_k 为负数时回退默认值", func(t *testing.T) {
+		t.Parallel()
+		cfg := baseValidConfig()
+		cfg.Policy.HybridTopK = -2
+
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("校验失败: %v", err)
+		}
+		if cfg.Policy.HybridTopK != defaultHybridTopK {
+			t.Fatalf("hybrid_top_k 负数回退错误: got=%d want=%d", cfg.Policy.HybridTopK, defaultHybridTopK)
+		}
+	})
+
+	t.Run("hybrid_top_k 正数应保留", func(t *testing.T) {
+		t.Parallel()
+		cfg := baseValidConfig()
+		cfg.Policy.Strategy = StrategyHybrid
+		cfg.Policy.HybridTopK = 5
+
+		if err := cfg.validate(); err != nil {
+			t.Fatalf("校验失败: %v", err)
+		}
+		if cfg.Policy.HybridTopK != 5 {
+			t.Fatalf("hybrid_top_k 保留错误: got=%d want=5", cfg.Policy.HybridTopK)
+		}
+		if cfg.Policy.Strategy != StrategyHybrid {
+			t.Fatalf("hybrid 策略不应被破坏: got=%s want=%s", cfg.Policy.Strategy, StrategyHybrid)
+		}
+	})
 }
 
 func TestValidateGeoMMDBURLInvalidScheme(t *testing.T) {

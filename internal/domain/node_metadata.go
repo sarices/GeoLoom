@@ -13,6 +13,7 @@ type NodeMetadata struct {
 	Address     string         `json:"address"`
 	Port        int            `json:"port"`
 	LastChecked time.Time      `json:"last_checked"`
+	HealthScore int            `json:"health_score,omitempty"`
 	RawConfig   map[string]any `json:"raw_config"`
 }
 

@@ -91,6 +91,49 @@ func TestCheckerEvaluateAndRebuild(t *testing.T) {
 	}
 }
 
+func TestCheckerShouldSortByScoreAndRebuildOnSignatureChange(t *testing.T) {
+	t.Parallel()
+	now := time.Date(2026, 3, 5, 12, 0, 0, 0, time.UTC)
+	pool := newPenaltyPoolWithNow(5*time.Minute, func() time.Time { return now })
+	doer := &stubDoer{statuses: map[string]int{"a": 204, "b": 204}, failing: map[string]bool{}}
+	rebuildCalls := 0
+	checker := newCheckerWithDeps(30*time.Second, "http://cp.cloudflare.com", pool, func(_ context.Context, _ []domain.NodeMetadata) error {
+		rebuildCalls++
+		return nil
+	}, doer, func() time.Time { return now })
+	checker.debounce = 0
+
+	nodes := []domain.NodeMetadata{{ID: "a", Address: "a", Port: 443}, {ID: "b", Address: "b", Port: 443}}
+	checker.SetNodes(nodes)
+	for _, node := range nodes {
+		if status := checker.nodeStatus(domain.NodeKey(node)); status.Score == 0 {
+			t.Fatalf("节点 %s 初始分数应被初始化为 100，而不是 0", domain.NodeKey(node))
+		}
+	}
+
+	checker.recordNodeStatus("a", NodeStatus{Score: 30})
+	checker.recordNodeStatus("b", NodeStatus{Score: 95})
+	stats := checker.filterNodeStats(checker.currentNodes())
+	if len(stats.Nodes) != 2 || domain.NodeKey(stats.Nodes[0]) != "b" {
+		t.Fatalf("候选应按 score 降序排序: %+v", stats.Nodes)
+	}
+	candidateIDs := nodeKeys(stats.Nodes)
+	if !checker.shouldRebuild(candidateIDs, candidateSelectionSignature(stats.Nodes)) {
+		t.Fatal("首次签名应触发重建")
+	}
+
+	checker.recordNodeStatus("a", NodeStatus{Score: 95})
+	checker.recordNodeStatus("b", NodeStatus{Score: 30})
+	stats = checker.filterNodeStats(checker.currentNodes())
+	if len(stats.Nodes) != 2 || domain.NodeKey(stats.Nodes[0]) != "a" {
+		t.Fatalf("候选排序应随 score 变化: %+v", stats.Nodes)
+	}
+	if !checker.shouldRebuild(nodeKeys(stats.Nodes), candidateSelectionSignature(stats.Nodes)) {
+		t.Fatal("签名变化后应再次重建")
+	}
+	_ = rebuildCalls
+}
+
 func TestCheckerDebounce(t *testing.T) {
 	t.Parallel()
 

@@ -85,8 +85,9 @@ func TestGeoloomRandomOutboundDialRandomlyAcrossCandidates(t *testing.T) {
 				return nil, false
 			}
 		},
-		tags:   []string{"a", "b"},
-		random: &stubRandomIntn{values: []int{0, 1, 0, 1}},
+		tags:    []string{"a", "b"},
+		weights: []int{3, 1},
+		random:  &stubRandomIntn{values: []int{0, 3, 0, 3}},
 	}
 
 	dst := M.ParseSocksaddrHostPort("example.com", 443)
@@ -157,7 +158,7 @@ func TestRegisterGeoloomRandom(t *testing.T) {
 
 	created, ok := registry.CreateOptions(geoloomRandomOutboundType)
 	if !ok {
-		t.Fatalf("未注册 geoloom random: %s", geoloomRandomOutboundType)
+		t.Fatalf("未注册 geoloom weighted-random: %s", geoloomRandomOutboundType)
 	}
 	if _, typeOK := created.(*geoloomRandomOutboundOptions); !typeOK {
 		t.Fatalf("options 类型错误: %T", created)
@@ -172,6 +173,45 @@ func TestRegisterGeoloomRandom(t *testing.T) {
 	}
 	if createdOutbound.Type() != geoloomRandomOutboundType {
 		t.Fatalf("outbound 类型错误: got=%s", createdOutbound.Type())
+	}
+}
+
+func TestGeoloomRandomOutboundWeightedPick(t *testing.T) {
+	t.Parallel()
+
+	outA := &stubOutbound{adapterType: "socks", tag: "a", network: []string{N.NetworkTCP, N.NetworkUDP}}
+	outB := &stubOutbound{adapterType: "socks", tag: "b", network: []string{N.NetworkTCP, N.NetworkUDP}}
+	random := &geoloomRandomOutbound{
+		Adapter: boxOutbound.NewAdapter(geoloomRandomOutboundType, defaultLBTag, []string{N.NetworkTCP, N.NetworkUDP}, []string{"a", "b"}),
+		lookupOutbound: func(tag string) (adapter.Outbound, bool) {
+			if tag == "a" {
+				return outA, true
+			}
+			if tag == "b" {
+				return outB, true
+			}
+			return nil, false
+		},
+		tags:    []string{"a", "b"},
+		weights: []int{8, 1},
+		random:  &stubRandomIntn{values: []int{0, 1, 2, 3, 4, 5, 6, 7, 8}},
+	}
+	dst := M.ParseSocksaddrHostPort("example.com", 443)
+	for i := 0; i < 9; i++ {
+		if _, err := random.DialContext(context.Background(), N.NetworkTCP, dst); err != nil {
+			t.Fatalf("DialContext 返回错误: %v", err)
+		}
+	}
+	if outA.dialCount <= outB.dialCount {
+		t.Fatalf("高权重节点应命中更多: a=%d b=%d", outA.dialCount, outB.dialCount)
+	}
+}
+
+func TestNormalizeWeightsShouldFallbackToEqualWeight(t *testing.T) {
+	t.Parallel()
+	weights := normalizeWeights(nil, 3)
+	if len(weights) != 3 || weights[0] != 1 || weights[1] != 1 || weights[2] != 1 {
+		t.Fatalf("默认权重错误: %+v", weights)
 	}
 }
 

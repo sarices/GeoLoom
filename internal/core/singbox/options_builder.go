@@ -24,6 +24,7 @@ const (
 	defaultLBTag       = "lb-out"
 	defaultListenAddr  = "0.0.0.0"
 	maxValidPortNumber = 65535
+	defaultHybridTopK  = 3
 )
 
 // CoreBuildStats 表示 Core Builder 最近一次构建统计。
@@ -48,7 +49,7 @@ func (b *OptionsBuilder) LastBuildStats() CoreBuildStats {
 	}
 }
 
-// Build 构建最小可用 sing-box 配置：SOCKS 入站 + 节点出站 + direct + lb-out(random/urltest) + final route。
+// Build 构建最小可用 sing-box 配置：SOCKS 入站 + 节点出站 + direct + lb-out(weighted-random/urltest) + final route。
 func (b *OptionsBuilder) Build(cfg config.Config, nodes []domain.NodeMetadata) (*option.Options, error) {
 	b.lastBuildStats = CoreBuildStats{}
 
@@ -65,6 +66,7 @@ func (b *OptionsBuilder) Build(cfg config.Config, nodes []domain.NodeMetadata) (
 	}
 
 	nodeOutbounds := make([]option.Outbound, 0, len(nodes))
+	supportedNodes := make([]domain.NodeMetadata, 0, len(nodes))
 	nodeTags := make([]string, 0, len(nodes))
 	tagSeen := make(map[string]int, len(nodes)+2)
 	unsupported := make([]string, 0)
@@ -79,6 +81,7 @@ func (b *OptionsBuilder) Build(cfg config.Config, nodes []domain.NodeMetadata) (
 			return nil, err
 		}
 		nodeOutbounds = append(nodeOutbounds, outbound)
+		supportedNodes = append(supportedNodes, node)
 		nodeTags = append(nodeTags, outbound.Tag)
 	}
 
@@ -95,7 +98,7 @@ func (b *OptionsBuilder) Build(cfg config.Config, nodes []domain.NodeMetadata) (
 		SupportedCandidates: len(nodeOutbounds),
 	}
 
-	lbOutbound := buildLBOutbound(cfg, nodeTags)
+	lbOutbound := buildLBOutbound(cfg, supportedNodes, nodeTags)
 
 	outbounds := make([]option.Outbound, 0, len(nodeOutbounds)+2)
 	outbounds = append(outbounds, nodeOutbounds...)
@@ -121,24 +124,71 @@ func (b *OptionsBuilder) Build(cfg config.Config, nodes []domain.NodeMetadata) (
 	}, nil
 }
 
-func buildLBOutbound(cfg config.Config, nodeTags []string) option.Outbound {
+func buildLBOutbound(cfg config.Config, nodes []domain.NodeMetadata, nodeTags []string) option.Outbound {
 	strategy := cfg.Policy.Strategy
 	if strategy == config.StrategyURLTest {
 		return buildURLTestOutbound(nodeTags, cfg.Policy.HealthCheck)
 	}
-	return buildRandomOutbound(nodeTags)
+	if strategy == config.StrategyHybrid {
+		return buildHybridOutbound(cfg.Policy.HybridTopK, nodes, nodeTags)
+	}
+	return buildRandomOutbound(nodes, nodeTags)
 }
 
-func buildRandomOutbound(nodeTags []string) option.Outbound {
+func buildRandomOutbound(nodes []domain.NodeMetadata, nodeTags []string) option.Outbound {
 	outbounds := make([]string, 0, len(nodeTags))
-	outbounds = append(outbounds, nodeTags...)
+	weights := make([]int, 0, len(nodeTags))
+	for index, tag := range nodeTags {
+		outbounds = append(outbounds, tag)
+		weight := 1
+		if index < len(nodes) {
+			weight = randomWeightFromScore(nodes[index].HealthScore)
+		}
+		weights = append(weights, weight)
+	}
 	return option.Outbound{
 		Type: geoloomRandomOutboundType,
 		Tag:  defaultLBTag,
 		Options: &geoloomRandomOutboundOptions{
 			Outbounds: outbounds,
+			Weights:   weights,
 		},
 	}
+}
+
+func buildHybridOutbound(topK int, nodes []domain.NodeMetadata, nodeTags []string) option.Outbound {
+	hybridNodes, hybridTags := selectHybridCandidates(topK, nodes, nodeTags)
+	return buildRandomOutbound(hybridNodes, hybridTags)
+}
+
+func selectHybridCandidates(topK int, nodes []domain.NodeMetadata, nodeTags []string) ([]domain.NodeMetadata, []string) {
+	limit := len(nodes)
+	if len(nodeTags) < limit {
+		limit = len(nodeTags)
+	}
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	topK = normalizeBuilderHybridTopK(topK)
+	if limit <= topK {
+		return append([]domain.NodeMetadata(nil), nodes[:limit]...), append([]string(nil), nodeTags[:limit]...)
+	}
+
+	cutoffIndex := topK - 1
+	cutoffScore := nodes[cutoffIndex].HealthScore
+	selected := topK
+	for selected < limit && nodes[selected].HealthScore == cutoffScore {
+		selected++
+	}
+	return append([]domain.NodeMetadata(nil), nodes[:selected]...), append([]string(nil), nodeTags[:selected]...)
+}
+
+func normalizeBuilderHybridTopK(topK int) int {
+	if topK <= 0 {
+		return defaultHybridTopK
+	}
+	return topK
 }
 
 func buildURLTestOutbound(nodeTags []string, health config.HealthCheckConfig) option.Outbound {
@@ -167,6 +217,21 @@ func buildURLTestOutbound(nodeTags []string, health config.HealthCheckConfig) op
 			URL:       url,
 			Interval:  badoption.Duration(interval),
 		},
+	}
+}
+
+func randomWeightFromScore(score int) int {
+	switch {
+	case score >= 90:
+		return 8
+	case score >= 70:
+		return 5
+	case score >= 40:
+		return 3
+	case score > 0:
+		return 1
+	default:
+		return 1
 	}
 }
 

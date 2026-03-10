@@ -12,6 +12,14 @@ type CandidateStats struct {
 	AllPenalizedFallback bool
 }
 
+// CandidatePenaltyState 表示节点在当前轮次的惩罚评估结果。
+type CandidatePenaltyState struct {
+	NodeKey      string    `json:"node_key"`
+	Penalized    bool      `json:"penalized"`
+	PenaltyUntil time.Time `json:"penalty_until"`
+	Fallback     bool      `json:"fallback"`
+}
+
 // PenaltyState 表示单节点惩罚状态。
 type PenaltyState struct {
 	PenaltyUntil time.Time `json:"penalty_until"`
@@ -67,27 +75,8 @@ func (p *PenaltyPool) MarkSuccess(nodeKey string) {
 
 // IsPenalized 判断节点是否在惩罚窗口内。
 func (p *PenaltyPool) IsPenalized(nodeKey string) bool {
-	if nodeKey == "" {
-		return false
-	}
-	now := p.nowFunc()
-
-	p.mu.RLock()
-	until, exists := p.penalties[nodeKey]
-	p.mu.RUnlock()
-	if !exists {
-		return false
-	}
-	if now.Before(until) {
-		return true
-	}
-
-	p.mu.Lock()
-	if currentUntil, ok := p.penalties[nodeKey]; ok && !now.Before(currentUntil) {
-		delete(p.penalties, nodeKey)
-	}
-	p.mu.Unlock()
-	return false
+	_, penalized := p.penaltyUntil(nodeKey)
+	return penalized
 }
 
 // FilterCandidates 过滤惩罚节点；若全部被惩罚，返回原始节点兜底。
@@ -124,6 +113,49 @@ func (p *PenaltyPool) FilterCandidatesWithStats(nodes []string) CandidateStats {
 		PenalizedCount:       penalizedCount,
 		AllPenalizedFallback: false,
 	}
+}
+
+// EvaluateCandidates 返回节点惩罚状态明细，并保留全惩罚兜底语义。
+func (p *PenaltyPool) EvaluateCandidates(nodes []string) []CandidatePenaltyState {
+	if len(nodes) == 0 {
+		return nil
+	}
+	stats := p.FilterCandidatesWithStats(nodes)
+	result := make([]CandidatePenaltyState, 0, len(nodes))
+	for _, node := range nodes {
+		until, penalized := p.penaltyUntil(node)
+		result = append(result, CandidatePenaltyState{
+			NodeKey:      node,
+			Penalized:    penalized,
+			PenaltyUntil: until,
+			Fallback:     stats.AllPenalizedFallback,
+		})
+	}
+	return result
+}
+
+func (p *PenaltyPool) penaltyUntil(nodeKey string) (time.Time, bool) {
+	if nodeKey == "" {
+		return time.Time{}, false
+	}
+	now := p.nowFunc()
+
+	p.mu.RLock()
+	until, exists := p.penalties[nodeKey]
+	p.mu.RUnlock()
+	if !exists {
+		return time.Time{}, false
+	}
+	if now.Before(until) {
+		return until, true
+	}
+
+	p.mu.Lock()
+	if currentUntil, ok := p.penalties[nodeKey]; ok && !now.Before(currentUntil) {
+		delete(p.penalties, nodeKey)
+	}
+	p.mu.Unlock()
+	return time.Time{}, false
 }
 
 // Snapshot 返回当前惩罚快照，便于调试与测试。

@@ -13,6 +13,7 @@ import (
 const (
 	StrategyRandom  = "random"
 	StrategyURLTest = "urltest"
+	StrategyHybrid  = "hybrid"
 
 	SourceTypeSource    = "source"
 	SourceTypeSubscribe = "subscribe"
@@ -24,6 +25,7 @@ const (
 	defaultAPIListen           = "127.0.0.1:9090"
 	defaultAPIAuthHeader       = "X-GeoLoom-Token"
 	defaultStatePath           = "geoloom-state.json"
+	defaultHybridTopK          = 3
 
 	minPort = 1
 	maxPort = 65535
@@ -48,6 +50,7 @@ type GatewayConfig struct {
 // PolicyConfig 定义转发策略与过滤规则。
 type PolicyConfig struct {
 	Strategy    string            `yaml:"strategy"`
+	HybridTopK  int               `yaml:"hybrid_top_k"`
 	Filter      FilterConfig      `yaml:"filter"`
 	HealthCheck HealthCheckConfig `yaml:"health_check"`
 	Refresh     RefreshConfig     `yaml:"refresh"`
@@ -135,6 +138,7 @@ func (c *Config) validate() error {
 	}
 
 	c.Policy.Strategy = normalizeStrategy(c.Policy.Strategy)
+	c.Policy.HybridTopK = normalizeHybridTopK(c.Policy.HybridTopK)
 	if c.Policy.HealthCheck.Enabled {
 		c.Policy.HealthCheck = normalizeHealthCheck(c.Policy.HealthCheck)
 		interval, err := time.ParseDuration(c.Policy.HealthCheck.Interval)
@@ -229,6 +233,8 @@ func normalizeStrategy(raw string) string {
 		return StrategyRandom
 	case StrategyURLTest:
 		return StrategyURLTest
+	case StrategyHybrid:
+		return StrategyHybrid
 	default:
 		return StrategyRandom
 	}
@@ -242,6 +248,13 @@ func normalizeHealthCheck(cfg HealthCheckConfig) HealthCheckConfig {
 		cfg.URL = defaultHealthCheckURL
 	}
 	return cfg
+}
+
+func normalizeHybridTopK(topK int) int {
+	if topK <= 0 {
+		return defaultHybridTopK
+	}
+	return topK
 }
 
 func normalizeRefresh(cfg RefreshConfig) RefreshConfig {

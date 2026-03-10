@@ -31,7 +31,7 @@ func (fakeProvider) LogsPayload() any {
 func (nullHealthProvider) HealthPayload() any {
 	return map[string]any{
 		"config":  map[string]any{"enabled": true, "interval": "30s", "url": "https://example.com"},
-		"summary": map[string]any{"tracked_nodes": 0, "penalized_nodes": 0, "last_rebuild_at": ""},
+		"summary": map[string]any{"tracked_nodes": 0, "penalized_nodes": 0, "ready_nodes": 0, "degraded_nodes": 0, "last_rebuild_at": ""},
 		"health": map[string]any{
 			"interval":        1,
 			"debounce":        2,

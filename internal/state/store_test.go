@@ -14,8 +14,16 @@ func TestStoreLoadSaveRoundTrip(t *testing.T) {
 	store := NewStore(filepath.Join(t.TempDir(), "state.json"))
 	now := time.Date(2026, 3, 9, 10, 0, 0, 0, time.UTC)
 	want := Snapshot{
-		PenaltyUntil:    map[string]time.Time{"node-a": now.Add(time.Minute)},
-		NodeStatuses:    map[string]health.NodeStatus{"node-a": {LastCheckAt: now, LastReachable: true}},
+		PenaltyUntil: map[string]time.Time{"node-a": now.Add(time.Minute)},
+		NodeStatuses: map[string]health.NodeStatus{"node-a": {
+			LastCheckAt:         now,
+			LastReachable:       true,
+			LastSuccessAt:       now,
+			ConsecutiveFailures: 0,
+			SuccessCount:        2,
+			FailureCount:        1,
+			Score:               93,
+		}},
 		LastCountryCode: map[string]string{"node-a": "JP"},
 	}
 	if err := store.Save(want); err != nil {
@@ -27,6 +35,9 @@ func TestStoreLoadSaveRoundTrip(t *testing.T) {
 	}
 	if got.LastCountryCode["node-a"] != "JP" || got.PenaltyUntil["node-a"].IsZero() {
 		t.Fatalf("状态恢复不匹配: %+v", got)
+	}
+	if got.NodeStatuses["node-a"].Score != 93 || got.NodeStatuses["node-a"].SuccessCount != 2 {
+		t.Fatalf("NodeStatus 扩展字段恢复不匹配: %+v", got.NodeStatuses["node-a"])
 	}
 }
 
@@ -96,5 +107,21 @@ func TestStoreLoadShouldDropExpiredPenalty(t *testing.T) {
 	}
 	if len(got.PenaltyUntil) != 0 {
 		t.Fatalf("过期惩罚应被清理: %+v", got.PenaltyUntil)
+	}
+}
+
+func TestStoreLoadShouldAcceptLegacyNodeStatusJSON(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "legacy.json")
+	content := []byte(`{"penalty_until":{},"node_statuses":{"node-a":{"last_check_at":"2026-03-09T10:00:00Z","last_reachable":true}},"last_country_code":{}}`)
+	if err := os.WriteFile(path, content, 0o600); err != nil {
+		t.Fatalf("写入 legacy 文件失败: %v", err)
+	}
+	got, err := NewStore(path).Load()
+	if err != nil {
+		t.Fatalf("legacy JSON 不应加载失败: %v", err)
+	}
+	if got.NodeStatuses["node-a"].LastReachable != true {
+		t.Fatalf("legacy NodeStatus 加载错误: %+v", got.NodeStatuses)
 	}
 }

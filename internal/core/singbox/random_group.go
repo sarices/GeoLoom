@@ -21,6 +21,7 @@ const geoloomRandomOutboundType = "geoloom-random"
 
 type geoloomRandomOutboundOptions struct {
 	Outbounds []string `json:"outbounds"`
+	Weights   []int    `json:"weights,omitempty"`
 }
 
 type randomIntn interface {
@@ -34,6 +35,7 @@ type geoloomRandomOutbound struct {
 
 	lookupOutbound func(tag string) (adapter.Outbound, bool)
 	tags           []string
+	weights        []int
 
 	randomMu sync.Mutex
 	random   randomIntn
@@ -56,10 +58,12 @@ func newGeoloomRandomOutbound(ctx context.Context, _ adapter.Router, _ log.Conte
 	}
 
 	candidateTags := append([]string(nil), options.Outbounds...)
+	candidateWeights := normalizeWeights(options.Weights, len(candidateTags))
 	return &geoloomRandomOutbound{
 		Adapter:        boxOutbound.NewAdapter(geoloomRandomOutboundType, tag, []string{N.NetworkTCP, N.NetworkUDP}, candidateTags),
 		lookupOutbound: outboundManager.Outbound,
 		tags:           candidateTags,
+		weights:        candidateWeights,
 		random:         rand.New(rand.NewSource(time.Now().UnixNano())),
 	}, nil
 }
@@ -103,7 +107,8 @@ func (g *geoloomRandomOutbound) All() []string {
 func (g *geoloomRandomOutbound) pickOutboundByNetwork(network string) (adapter.Outbound, error) {
 	normalized := N.NetworkName(network)
 	candidates := make([]adapter.Outbound, 0, len(g.tags))
-	for _, tag := range g.tags {
+	candidateWeights := make([]int, 0, len(g.tags))
+	for index, tag := range g.tags {
 		detour, loaded := g.lookupOutbound(tag)
 		if !loaded {
 			return nil, E.New("outbound not found: ", tag)
@@ -112,20 +117,25 @@ func (g *geoloomRandomOutbound) pickOutboundByNetwork(network string) (adapter.O
 			continue
 		}
 		candidates = append(candidates, detour)
+		weight := 1
+		if index < len(g.weights) && g.weights[index] > 0 {
+			weight = g.weights[index]
+		}
+		candidateWeights = append(candidateWeights, weight)
 	}
 	if len(candidates) == 0 {
 		return nil, E.New("missing supported outbound")
 	}
 
-	selected := candidates[g.nextIndex(len(candidates))]
+	selected := candidates[g.nextIndex(candidateWeights)]
 	g.stateMu.Lock()
 	g.lastProxy = selected.Tag()
 	g.stateMu.Unlock()
 	return selected, nil
 }
 
-func (g *geoloomRandomOutbound) nextIndex(size int) int {
-	if size <= 1 {
+func (g *geoloomRandomOutbound) nextIndex(weights []int) int {
+	if len(weights) <= 1 {
 		return 0
 	}
 
@@ -134,5 +144,39 @@ func (g *geoloomRandomOutbound) nextIndex(size int) int {
 	if g.random == nil {
 		g.random = rand.New(rand.NewSource(time.Now().UnixNano()))
 	}
-	return g.random.Intn(size)
+	total := 0
+	for _, weight := range weights {
+		if weight > 0 {
+			total += weight
+		}
+	}
+	if total <= 0 {
+		return g.random.Intn(len(weights))
+	}
+	target := g.random.Intn(total)
+	cursor := 0
+	for index, weight := range weights {
+		if weight <= 0 {
+			continue
+		}
+		cursor += weight
+		if target < cursor {
+			return index
+		}
+	}
+	return len(weights) - 1
+}
+
+func normalizeWeights(weights []int, size int) []int {
+	if size <= 0 {
+		return nil
+	}
+	result := make([]int, size)
+	for index := 0; index < size; index++ {
+		result[index] = 1
+		if index < len(weights) && weights[index] > 0 {
+			result[index] = weights[index]
+		}
+	}
+	return result
 }

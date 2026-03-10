@@ -98,18 +98,21 @@ func TestOptionsBuilderBuildSuccess(t *testing.T) {
 
 	lb := options.Outbounds[len(options.Outbounds)-1]
 	if lb.Type != geoloomRandomOutboundType {
-		t.Fatalf("random lb 类型错误: got=%s want=%s", lb.Type, geoloomRandomOutboundType)
+		t.Fatalf("weighted-random lb 类型错误: got=%s want=%s", lb.Type, geoloomRandomOutboundType)
 	}
 	randomOptions, ok := lb.Options.(*geoloomRandomOutboundOptions)
 	if !ok {
-		t.Fatalf("random options 类型断言失败: %T", lb.Options)
+		t.Fatalf("weighted-random options 类型断言失败: %T", lb.Options)
 	}
 	if len(randomOptions.Outbounds) != len(nodes) {
-		t.Fatalf("random outbounds 数量错误: got=%d want=%d", len(randomOptions.Outbounds), len(nodes))
+		t.Fatalf("weighted-random outbounds 数量错误: got=%d want=%d", len(randomOptions.Outbounds), len(nodes))
+	}
+	if len(randomOptions.Weights) != len(nodes) {
+		t.Fatalf("weighted-random weights 数量错误: got=%d want=%d", len(randomOptions.Weights), len(nodes))
 	}
 	for _, tag := range randomOptions.Outbounds {
 		if tag == directOutboundTag {
-			t.Fatalf("random outbounds 不应包含 direct: %+v", randomOptions.Outbounds)
+			t.Fatalf("weighted-random outbounds 不应包含 direct: %+v", randomOptions.Outbounds)
 		}
 	}
 
@@ -163,9 +166,9 @@ func TestOptionsBuilderBuildRandomStrategyUsesGeoloomRandom(t *testing.T) {
 	builder := NewOptionsBuilder()
 	cfg := config.Config{Gateway: config.GatewayConfig{SocksPort: 1080}}
 	nodes := []domain.NodeMetadata{
-		buildSocksNode("a", "1.1.1.1", 1080),
-		buildSocksNode("b", "2.2.2.2", 1081),
-		buildSocksNode("c", "3.3.3.3", 1082),
+		func() domain.NodeMetadata { n := buildSocksNode("a", "1.1.1.1", 1080); n.HealthScore = 95; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("b", "2.2.2.2", 1081); n.HealthScore = 60; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("c", "3.3.3.3", 1082); n.HealthScore = 10; return n }(),
 	}
 
 	options, err := builder.Build(cfg, nodes)
@@ -175,6 +178,155 @@ func TestOptionsBuilderBuildRandomStrategyUsesGeoloomRandom(t *testing.T) {
 	lb := options.Outbounds[len(options.Outbounds)-1]
 	if lb.Type != geoloomRandomOutboundType {
 		t.Fatalf("lb 类型错误: got=%s want=%s", lb.Type, geoloomRandomOutboundType)
+	}
+	randomOptions, ok := lb.Options.(*geoloomRandomOutboundOptions)
+	if !ok {
+		t.Fatalf("random options 类型错误: %T", lb.Options)
+	}
+	if len(randomOptions.Weights) != 3 {
+		t.Fatalf("weights 数量错误: %+v", randomOptions.Weights)
+	}
+	if randomOptions.Weights[0] <= randomOptions.Weights[1] || randomOptions.Weights[1] <= randomOptions.Weights[2] {
+		t.Fatalf("weights 应按 score 递减映射: %+v", randomOptions.Weights)
+	}
+}
+
+func TestOptionsBuilderBuildHybridStrategyUsesConfiguredTopK(t *testing.T) {
+	t.Parallel()
+
+	builder := NewOptionsBuilder()
+	cfg := config.Config{
+		Gateway: config.GatewayConfig{SocksPort: 1080},
+		Policy:  config.PolicyConfig{Strategy: config.StrategyHybrid, HybridTopK: 2},
+	}
+	nodes := []domain.NodeMetadata{
+		func() domain.NodeMetadata { n := buildSocksNode("a", "1.1.1.1", 1080); n.HealthScore = 98; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("b", "2.2.2.2", 1081); n.HealthScore = 90; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("c", "3.3.3.3", 1082); n.HealthScore = 70; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("d", "4.4.4.4", 1083); n.HealthScore = 10; return n }(),
+	}
+
+	options, err := builder.Build(cfg, nodes)
+	if err != nil {
+		t.Fatalf("Build 返回错误: %v", err)
+	}
+	lb := options.Outbounds[len(options.Outbounds)-1]
+	if lb.Type != geoloomRandomOutboundType {
+		t.Fatalf("hybrid lb 类型错误: got=%s want=%s", lb.Type, geoloomRandomOutboundType)
+	}
+	randomOptions, ok := lb.Options.(*geoloomRandomOutboundOptions)
+	if !ok {
+		t.Fatalf("hybrid options 类型错误: %T", lb.Options)
+	}
+	if len(randomOptions.Outbounds) != 2 {
+		t.Fatalf("hybrid 应只保留 Top-2 基准子集: %+v", randomOptions.Outbounds)
+	}
+	if len(randomOptions.Weights) != len(randomOptions.Outbounds) {
+		t.Fatalf("hybrid weights 数量错误: outbounds=%d weights=%d", len(randomOptions.Outbounds), len(randomOptions.Weights))
+	}
+	if randomOptions.Weights[0] < randomOptions.Weights[1] {
+		t.Fatalf("hybrid 权重应与候选顺序一致: %+v", randomOptions.Weights)
+	}
+	for _, tag := range randomOptions.Outbounds {
+		if tag == options.Outbounds[2].Tag || tag == options.Outbounds[3].Tag {
+			t.Fatalf("hybrid 不应包含 Top-K 之外的低质量节点: %+v", randomOptions.Outbounds)
+		}
+	}
+}
+
+func TestOptionsBuilderBuildHybridStrategyShouldIncludeTiedScoreAtConfiguredCutoff(t *testing.T) {
+	t.Parallel()
+
+	builder := NewOptionsBuilder()
+	cfg := config.Config{
+		Gateway: config.GatewayConfig{SocksPort: 1080},
+		Policy:  config.PolicyConfig{Strategy: config.StrategyHybrid, HybridTopK: 2},
+	}
+	nodes := []domain.NodeMetadata{
+		func() domain.NodeMetadata { n := buildSocksNode("a", "1.1.1.1", 1080); n.HealthScore = 95; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("b", "2.2.2.2", 1081); n.HealthScore = 80; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("c", "3.3.3.3", 1082); n.HealthScore = 80; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("d", "4.4.4.4", 1083); n.HealthScore = 10; return n }(),
+	}
+
+	options, err := builder.Build(cfg, nodes)
+	if err != nil {
+		t.Fatalf("Build 返回错误: %v", err)
+	}
+	randomOptions := options.Outbounds[len(options.Outbounds)-1].Options.(*geoloomRandomOutboundOptions)
+	if len(randomOptions.Outbounds) != 3 {
+		t.Fatalf("并列 cutoff 分数应一并纳入: %+v", randomOptions.Outbounds)
+	}
+}
+
+func TestOptionsBuilderBuildHybridStrategyShouldFallbackWhenTopKExceedsCandidates(t *testing.T) {
+	t.Parallel()
+
+	builder := NewOptionsBuilder()
+	cfg := config.Config{
+		Gateway: config.GatewayConfig{SocksPort: 1080},
+		Policy:  config.PolicyConfig{Strategy: config.StrategyHybrid, HybridTopK: 5},
+	}
+	nodes := []domain.NodeMetadata{
+		func() domain.NodeMetadata { n := buildSocksNode("a", "1.1.1.1", 1080); n.HealthScore = 30; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("b", "2.2.2.2", 1081); n.HealthScore = 20; return n }(),
+	}
+
+	options, err := builder.Build(cfg, nodes)
+	if err != nil {
+		t.Fatalf("Build 返回错误: %v", err)
+	}
+	randomOptions := options.Outbounds[len(options.Outbounds)-1].Options.(*geoloomRandomOutboundOptions)
+	if len(randomOptions.Outbounds) != 2 || len(randomOptions.Weights) != 2 {
+		t.Fatalf("Top-K 大于候选数时应退化为全量子集: outbounds=%+v weights=%+v", randomOptions.Outbounds, randomOptions.Weights)
+	}
+}
+
+func TestOptionsBuilderBuildHybridStrategyShouldFallbackToDefaultWhenTopKInvalid(t *testing.T) {
+	t.Parallel()
+
+	builder := NewOptionsBuilder()
+	cfg := config.Config{
+		Gateway: config.GatewayConfig{SocksPort: 1080},
+		Policy:  config.PolicyConfig{Strategy: config.StrategyHybrid, HybridTopK: 0},
+	}
+	nodes := []domain.NodeMetadata{
+		func() domain.NodeMetadata { n := buildSocksNode("a", "1.1.1.1", 1080); n.HealthScore = 95; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("b", "2.2.2.2", 1081); n.HealthScore = 80; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("c", "3.3.3.3", 1082); n.HealthScore = 60; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("d", "4.4.4.4", 1083); n.HealthScore = 10; return n }(),
+	}
+
+	options, err := builder.Build(cfg, nodes)
+	if err != nil {
+		t.Fatalf("Build 返回错误: %v", err)
+	}
+	randomOptions := options.Outbounds[len(options.Outbounds)-1].Options.(*geoloomRandomOutboundOptions)
+	if len(randomOptions.Outbounds) != 3 {
+		t.Fatalf("非法 Top-K 应回退默认值 3: %+v", randomOptions.Outbounds)
+	}
+}
+
+func TestOptionsBuilderBuildHybridStrategyShouldFallbackWhenCandidatesFew(t *testing.T) {
+	t.Parallel()
+
+	builder := NewOptionsBuilder()
+	cfg := config.Config{Gateway: config.GatewayConfig{SocksPort: 1080}, Policy: config.PolicyConfig{Strategy: config.StrategyHybrid}}
+	nodes := []domain.NodeMetadata{
+		func() domain.NodeMetadata { n := buildSocksNode("a", "1.1.1.1", 1080); n.HealthScore = 0; return n }(),
+		func() domain.NodeMetadata { n := buildSocksNode("b", "2.2.2.2", 1081); n.HealthScore = 0; return n }(),
+	}
+
+	options, err := builder.Build(cfg, nodes)
+	if err != nil {
+		t.Fatalf("Build 返回错误: %v", err)
+	}
+	randomOptions := options.Outbounds[len(options.Outbounds)-1].Options.(*geoloomRandomOutboundOptions)
+	if len(randomOptions.Outbounds) != 2 || len(randomOptions.Weights) != 2 {
+		t.Fatalf("少量候选时应自然退化为全量子集: outbounds=%+v weights=%+v", randomOptions.Outbounds, randomOptions.Weights)
+	}
+	if randomOptions.Weights[0] != 1 || randomOptions.Weights[1] != 1 {
+		t.Fatalf("冷启动低分时应退化为等权: %+v", randomOptions.Weights)
 	}
 }
 
@@ -429,10 +581,10 @@ func TestEnsureRegistryContextRegistersGeoloomRandomOptions(t *testing.T) {
 	}
 	created, ok := registry.CreateOptions(geoloomRandomOutboundType)
 	if !ok {
-		t.Fatalf("未注册 geoloom random 类型: %s", geoloomRandomOutboundType)
+		t.Fatalf("未注册 geoloom weighted-random 类型: %s", geoloomRandomOutboundType)
 	}
 	if _, typeOK := created.(*geoloomRandomOutboundOptions); !typeOK {
-		t.Fatalf("geoloom random options 类型错误: %T", created)
+		t.Fatalf("geoloom weighted-random options 类型错误: %T", created)
 	}
 }
 
